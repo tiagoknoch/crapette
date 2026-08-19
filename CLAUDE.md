@@ -61,9 +61,10 @@ pre-disabled (no legal-move hints, no greyed-out draw button) — every action i
 attempted, and only rejected attempts get feedback (a red flash on the attempted
 destination + a reason banner at the top, ~900ms, see `REASON_TEXT` in
 `gameStore.ts`). Finding the play is the player's job; a hint-mode toggle is a
-plausible future option but isn't built. `scene.ts` also gained a persistent
-interactive layer (built once, independent of the card layer that's rebuilt every
-render) so every slot — including empty ones — is clickable via Pixi's `pointertap`.
+plausible future option but isn't built. Every slot is clickable via Pixi's
+`pointertap` — including empty ones (an invisible hit-zone) and, for a house, the
+*actual* top card's current sprite specifically (not a fixed base rectangle — see the
+house-fan note below for why that distinction matters).
 
 CPU-side automatic play (`cpuPlayer.ts` on a timer, alternating with human input) is
 **not** wired in yet — both seats are click-driven for now, purely so step 7's
@@ -84,6 +85,26 @@ card, which is impossible with real decks. `deck.ts` now has `buildStandardDeck(
 them independently — `docs/tech-spec.md` §2 has been corrected to match. A same-rank
 duplicate can still legitimately appear on the shared tableau (each player's own copy,
 e.g. one in a house each) — just never within one player's own reserve/houses/hand/waste.
+
+**Houses fan horizontally, not vertically** — corrected per direct user direction to
+match the Wikipedia setup photo (cards overlap sideways, outward, away from the shared
+foundation columns; see `HOUSE_FAN_SIGN` in `layout.ts`). This exposed a real
+interaction bug: click hit-zones used to be fixed rectangles at each slot's *base*
+position, so a fanned house's actual (visually shifted) top card could sit outside its
+own click target once the house held more than a couple of cards. Fixed by making the
+click handler live on the top card's actual rendered sprite (or an invisible hit-zone
+at the base position only when the pile is empty) instead of a static rectangle —
+`scene.ts`'s `makeClickable`/`drawEmptyHitZone`.
+
+**Drawing an unplayable card no longer auto-discards it**, per direct user direction:
+it used to silently discard and end the turn the moment `settle()` in `gameStore.ts`
+saw no legal move for it, which gave no sense that anything had happened. Now it just
+sits there face-up; discarding is always the explicit action of clicking it then
+clicking your own waste (same mechanic as the already-existing voluntary-discard
+path), whether or not it happens to have a legal move. There's also now a persistent
+turn indicator ("Your turn" / "CPU's turn" / game-over) drawn at the top of the table
+(`turnLabel` in `scene.ts`), so a turn actually ending is visible in the game itself,
+not just in the console log.
 
 Nothing under `/src/ui` exists yet — no HUD, no persistence, no i18n wiring.
 

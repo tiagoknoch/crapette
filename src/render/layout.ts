@@ -11,11 +11,23 @@ export const CARD_ASPECT = 489 / 338;
 export const CARD_WIDTH = 80;
 export const CARD_HEIGHT = Math.round(CARD_WIDTH * CARD_ASPECT);
 
-// Vertical peek per stacked card in a house, so the descending-alternating-color sequence
-// stays legible.
-export const HOUSE_OVERLAP_Y = 28;
+// Horizontal peek per stacked card in a house (matches the Wikipedia setup photo — houses
+// fan sideways, not into a tall vertical cascade), so the descending-alternating-color
+// sequence stays legible. Each house fans *outward*, away from the shared foundation
+// columns in the middle (cpu's houses fan left, human's fan right) — see HOUSE_FAN_SIGN.
+export const HOUSE_OVERLAP_X = 26;
 
-const MARGIN = 60;
+// Gap from the true canvas edge — used for the talon/waste/reserve row's outer slots,
+// which don't fan and so don't need extra clearance.
+const ROW_MARGIN = 60;
+// How many extra fanned-out cards a house can grow by before its fan would run off the
+// edge of the canvas. Generous, not exact — a house deep enough to exceed this is a rare,
+// acceptable edge case (same caveat as the old vertical cascade had).
+const HOUSE_FAN_ALLOWANCE = 6 * HOUSE_OVERLAP_X;
+// The house columns sit further in from the edge than the plain row margin, to leave that
+// fan-out room.
+const GRID_MARGIN = ROW_MARGIN + HOUSE_FAN_ALLOWANCE;
+
 const COLUMN_GAP = 36;
 const ROW_GAP = 30;
 
@@ -25,8 +37,12 @@ const MIDDLE_COLUMNS = 4;
 const MIDDLE_ROWS = 4;
 const TOTAL_ROWS = MIDDLE_ROWS + 2;
 
-export const LOGICAL_WIDTH = 2 * MARGIN + MIDDLE_COLUMNS * CARD_WIDTH + (MIDDLE_COLUMNS - 1) * COLUMN_GAP;
-export const LOGICAL_HEIGHT = 2 * MARGIN + TOTAL_ROWS * CARD_HEIGHT + (TOTAL_ROWS - 1) * ROW_GAP;
+export const LOGICAL_WIDTH = 2 * GRID_MARGIN + MIDDLE_COLUMNS * CARD_WIDTH + (MIDDLE_COLUMNS - 1) * COLUMN_GAP;
+export const LOGICAL_HEIGHT = 2 * ROW_MARGIN + TOTAL_ROWS * CARD_HEIGHT + (TOTAL_ROWS - 1) * ROW_GAP;
+
+// +1 fans rightward (human, on the right column), -1 fans leftward (cpu, on the left
+// column) — always away from the foundations in between.
+export const HOUSE_FAN_SIGN: Record<PlayerId, 1 | -1> = { human: 1, cpu: -1 };
 
 export interface Point {
   x: number;
@@ -48,11 +64,11 @@ export interface TableLayout {
 }
 
 function rowY(rowIndex: number): number {
-  return MARGIN + CARD_HEIGHT / 2 + rowIndex * (CARD_HEIGHT + ROW_GAP);
+  return ROW_MARGIN + CARD_HEIGHT / 2 + rowIndex * (CARD_HEIGHT + ROW_GAP);
 }
 
 function middleColumnX(col: number): number {
-  return MARGIN + CARD_WIDTH / 2 + col * (CARD_WIDTH + COLUMN_GAP);
+  return GRID_MARGIN + CARD_WIDTH / 2 + col * (CARD_WIDTH + COLUMN_GAP);
 }
 
 // Talon/waste/reserve spread evenly across the full width, independent of the middle grid's
@@ -60,9 +76,9 @@ function middleColumnX(col: number): number {
 // 3-slot band rather than aligning to the 4-column grid below/above it).
 function pileRowSlots(y: number): { left: Point; center: Point; right: Point } {
   return {
-    left: { x: MARGIN + CARD_WIDTH / 2, y },
+    left: { x: ROW_MARGIN + CARD_WIDTH / 2, y },
     center: { x: LOGICAL_WIDTH / 2, y },
-    right: { x: LOGICAL_WIDTH - MARGIN - CARD_WIDTH / 2, y },
+    right: { x: LOGICAL_WIDTH - ROW_MARGIN - CARD_WIDTH / 2, y },
   };
 }
 

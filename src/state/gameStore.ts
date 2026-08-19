@@ -147,12 +147,15 @@ function performDiscard(mover: PlayerId): void {
 // Cascades forced consequences after any state-changing action, until reaching a point where
 // a human decision is genuinely required (or the game has ended):
 // - a compulsory or optional move exists -> stop and wait, the human picks one
-// - a drawn hand card is sitting face-up with *no* legal move for it -> it must be
-//   discarded (§8: this is only a human *choice* when a legal move exists — see
-//   handleSlotClick's own-waste special case for that path; with no legal move at all
-//   there's nothing to choose between, so it's forced, not merely "stuck")
+// - a drawn hand card is sitting face-up -> stop and wait, *even if it has no legal move* —
+//   discarding it is always something the player does explicitly (click it, click own
+//   waste), per direct user direction: an automatic "can't play it, so it's silently
+//   discarded and your turn is over" was surprising and gave no sense that anything had
+//   happened. This module has no opinion on the drawn card beyond that: whatever the human
+//   does with it next is on them.
 // - otherwise, if drawing is possible -> stop and wait, the human can choose to draw
-// - otherwise there is truly nothing this player can do -> pass
+// - otherwise there is truly nothing this player can do at all (no drawn card sitting
+//   there either) -> pass automatically; there's nothing to click
 function settle(): void {
   while (state.status === 'in_progress') {
     const mover = state.turn;
@@ -161,10 +164,7 @@ function settle(): void {
 
     const hand = state.players[mover].hand;
     const drawnCardPending = hand.length > 0 && hand[hand.length - 1].faceUp;
-    if (drawnCardPending) {
-      performDiscard(mover);
-      continue;
-    }
+    if (drawnCardPending) return;
 
     if (canDrawHand(state, mover)) return;
 
