@@ -1,5 +1,5 @@
 import './style.css';
-import { buildTwoDeckPool, deal } from './engine/deck.ts';
+import { deal } from './engine/deck.ts';
 import { createTableScene, renderGameState } from './render/pixi/scene.ts';
 import { getFlash, getSelected, getState, handleSlotClick, initGameStore, subscribe } from './state/gameStore.ts';
 
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   const container = document.querySelector<HTMLDivElement>('#app');
   if (!container) throw new Error('#app container missing from index.html');
 
-  initGameStore(deal(buildTwoDeckPool(), makeSeededRng(1)));
+  initGameStore(deal(makeSeededRng(1)));
 
   const scene = await createTableScene(container, (ref) => handleSlotClick(ref));
   const render = (): void => renderGameState(scene, getState(), getSelected(), getFlash());

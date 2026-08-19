@@ -69,6 +69,22 @@ CPU-side automatic play (`cpuPlayer.ts` on a timer, alternating with human input
 **not** wired in yet — both seats are click-driven for now, purely so step 7's
 interaction could be verified end to end. That alternation is step 8, next per §14.
 
+`gameStore.ts` also logs every action to the browser console (prefixed `[crapette]`
+— selections, applied moves, rejections with their reason, draws, discards, passes,
+game-over) since there's no in-app HUD/move-log yet to see what happened during manual
+testing.
+
+**Fixed a real dealing bug found via manual play-testing**: `deck.ts` used to build one
+combined 104-card pool and shuffle it as a whole before splitting 52/52 — per real
+Crapette/Russian Bank rules (confirmed via the Wikipedia article, which the tech spec
+had gotten wrong at §2), each player shuffles and deals from their **own** independent
+52-card deck. The old approach could deal a single player two copies of the same
+card, which is impossible with real decks. `deck.ts` now has `buildStandardDeck(copy)`
+(52 unique cards) instead of `buildTwoDeckPool()`, and `deal(random)` shuffles two of
+them independently — `docs/tech-spec.md` §2 has been corrected to match. A same-rank
+duplicate can still legitimately appear on the shared tableau (each player's own copy,
+e.g. one in a house each) — just never within one player's own reserve/houses/hand/waste.
+
 Nothing under `/src/ui` exists yet — no HUD, no persistence, no i18n wiring.
 
 The engine/AI/CLI/render/state code is still young — fields or functions with no

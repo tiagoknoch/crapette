@@ -43,6 +43,26 @@ function refsEqual(a: PileRef, b: PileRef): boolean {
   return false;
 }
 
+const RANK_LABEL: Record<number, string> = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+const SUIT_GLYPH: Record<Card['suit'], string> = { S: '♠', H: '♥', D: '♦', C: '♣' };
+
+function cardLabel(card: Card): string {
+  return `${RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`;
+}
+
+function pileLabel(ref: PileRef): string {
+  if (ref.type === 'foundation') return `foundation[${ref.index}]`;
+  if (ref.type === 'house') return `${ref.owner}.house[${ref.index}]`;
+  return `${ref.owner}.${ref.type}`;
+}
+
+// Everything meaningful the store does gets logged to the console — there's no in-app HUD
+// or move log yet (that's step 9), and this is the cheapest way to have something readable
+// to point at while testing interactively.
+function log(...parts: unknown[]): void {
+  console.log('[crapette]', ...parts);
+}
+
 function topCardOf(state: GameState, ref: PileRef): Card | undefined {
   const cards =
     ref.type === 'reserve'
@@ -91,11 +111,18 @@ function notify(): void {
 
 function showReject(ref: PileRef, reason: UiRejectReason): void {
   flash = { ref, message: REASON_TEXT[reason] };
+  log('rejected:', pileLabel(ref), '—', REASON_TEXT[reason]);
   clearTimeout(flashTimeout);
   flashTimeout = setTimeout(() => {
     flash = null;
     notify();
   }, 900);
+}
+
+function logGameEndIfJustEnded(previousStatus: GameState['status']): void {
+  if (previousStatus === 'in_progress' && state.status !== 'in_progress') {
+    log(`game over: ${state.status}`, state.winner ? `winner=${state.winner}` : '', state.scores ?? '');
+  }
 }
 
 function isSelectableSource(ref: PileRef, mover: PlayerId): boolean {
@@ -109,8 +136,12 @@ function isOwnFaceDownTalon(ref: PileRef, mover: PlayerId): boolean {
 }
 
 function performDiscard(mover: PlayerId): void {
+  const previousStatus = state.status;
+  const discarded = state.players[mover].hand.at(-1);
   state = checkStalemate(checkWin(discardDrawnCardToWaste(state, mover), mover));
+  log(`${mover} discards ${discarded ? cardLabel(discarded) : '?'} to waste (turn ends)`);
   if (state.status === 'in_progress') state = startTurn(state);
+  logGameEndIfJustEnded(previousStatus);
 }
 
 // Cascades forced consequences after any state-changing action, until reaching a point where
@@ -137,8 +168,11 @@ function settle(): void {
 
     if (canDrawHand(state, mover)) return;
 
+    const previousStatus = state.status;
+    log(`${mover} has no legal move and nothing to draw — turn passes`);
     state = checkStalemate(passTurn(state, mover));
     if (state.status === 'in_progress') state = startTurn(state);
+    logGameEndIfJustEnded(previousStatus);
   }
 }
 
@@ -157,6 +191,8 @@ function attemptDraw(mover: PlayerId): void {
     return;
   }
   state = drawFromHand(state, mover);
+  const drawn = state.players[mover].hand.at(-1);
+  log(`${mover} draws ${drawn ? cardLabel(drawn) : '?'}`);
   settle();
 }
 
@@ -176,7 +212,10 @@ function attemptMove(move: Move, mover: PlayerId): void {
     showReject(move.to, evaluation.reason ?? 'not-available');
     return;
   }
+  const previousStatus = state.status;
+  log(`${mover} plays ${cardLabel(move.card)}: ${pileLabel(move.from)} -> ${pileLabel(move.to)}`);
   state = checkStalemate(checkWin(applyMove(state, move), mover));
+  logGameEndIfJustEnded(previousStatus);
   selected = null;
   settle();
 }
@@ -192,12 +231,17 @@ export function handleSlotClick(ref: PileRef): void {
       attemptDraw(mover);
     } else if (isSelectableSource(ref, mover)) {
       selected = ref;
+      const card = topCardOf(state, ref);
+      log(`${mover} picks up ${card ? cardLabel(card) : '?'} from ${pileLabel(ref)}`);
+    } else {
+      log(`${mover} clicks ${pileLabel(ref)} — not selectable (not their turn's available card)`);
     }
     notify();
     return;
   }
 
   if (refsEqual(ref, selected)) {
+    log(`${mover} puts ${pileLabel(ref)} back down`);
     selected = null;
     notify();
     return;

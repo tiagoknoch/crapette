@@ -3,15 +3,15 @@ import type { Card, FoundationSlot, GameState, PlayerId, PlayerState, Rank, Suit
 const SUITS: Suit[] = ['S', 'H', 'D', 'C'];
 const RANKS: Rank[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 
-// §2: "digitally there is no need to keep the two decks visually or structurally
-// distinct" — build one 104-card pool (two full standard decks).
-export function buildTwoDeckPool(): Card[] {
+// §2: each player brings their own standard 52-card deck — the two decks are shuffled
+// and dealt independently, never combined into one pool. `copy` only distinguishes each
+// deck's cards by id (e.g. "H7-0" vs "H7-1") so all 104 cards in play stay unique; it has
+// no gameplay meaning and isn't shown to players.
+export function buildStandardDeck(copy: 0 | 1): Card[] {
   const cards: Card[] = [];
-  for (let copy = 0; copy < 2; copy++) {
-    for (const suit of SUITS) {
-      for (const rank of RANKS) {
-        cards.push({ id: `${suit}${rank}-${copy}`, suit, rank, faceUp: false });
-      }
+  for (const suit of SUITS) {
+    for (const rank of RANKS) {
+      cards.push({ id: `${suit}${rank}-${copy}`, suit, rank, faceUp: false });
     }
   }
   return cards;
@@ -63,10 +63,15 @@ export function determineFirstPlayer(human: PlayerState, cpu: PlayerState, rando
   return random() < 0.5 ? 'human' : 'cpu';
 }
 
-export function deal(pool: Card[], random: () => number = Math.random): GameState {
-  const shuffled = shuffle(pool, random);
-  const human = dealPlayer('human', shuffled.slice(0, 52));
-  const cpu = dealPlayer('cpu', shuffled.slice(52, 104));
+// §2: "Each of the two players... takes a pack of 52 cards... shuffles it" (and the
+// opponent cuts it, physically — a purely mechanical step with no digital equivalent, so
+// it's skipped here) — each player's 52 cards come from their own independently-shuffled
+// deck, not a shared 104-card shuffle. A card can still have a same-rank/suit duplicate
+// on the shared tableau (the other player's copy), just never within one player's own
+// reserve/houses/hand/waste.
+export function deal(random: () => number = Math.random): GameState {
+  const human = dealPlayer('human', shuffle(buildStandardDeck(0), random));
+  const cpu = dealPlayer('cpu', shuffle(buildStandardDeck(1), random));
   const foundations: FoundationSlot[] = Array.from({ length: 8 }, () => ({ suit: null, cards: [] }));
 
   return {

@@ -3,7 +3,7 @@
 // rules-engine bugs before any UI exists. Node-only file — lives outside /engine, so
 // process/console usage here is fine.
 import { chooseCompulsoryMove, chooseMove, chooseOptionalMove } from '../ai/cpuPlayer.ts';
-import { buildTwoDeckPool, deal } from '../engine/deck.ts';
+import { deal } from '../engine/deck.ts';
 import { applyMove, discardDrawnCardToWaste, drawFromHand, passTurn, startTurn } from '../engine/engine.ts';
 import { canDrawHand, getLegalMoves } from '../engine/moveResolver.ts';
 import type { Card, GameState, PlayerId } from '../engine/types.ts';
@@ -156,7 +156,7 @@ interface GameResult {
 
 function playGame(seed: number, policies: Record<PlayerId, Policy>): GameResult {
   const rng = makeRng(seed);
-  let state = deal(buildTwoDeckPool(), rng);
+  let state = deal(rng);
   assertInvariants(state);
 
   let moves = 0;

@@ -25,7 +25,7 @@
 
 ## 2. Rules Reference (canonical, for implementation)
 
-Two standard 52-card decks are used, but **digitally there is no need to keep the two decks visually or structurally distinct** — physical decks only get separated at the end of a real-life game to reshuffle each pack; a digital game has no such requirement. Simplify to: build one 104-card pool (two full standard decks), shuffle, deal 52 cards to each player.
+Two standard 52-card decks are used — **one per player, shuffled and dealt independently**, not combined into one pool. Physically each player brings their own pack, shuffles it, and the opponent cuts it; only the *number* of decks in simultaneous play (104 cards total, 52 unique ranks×suits each appearing twice across the table) matters digitally, not any actual mixing of the two packs. Concretely: build two separate 52-card decks (tagged so their cards remain distinguishable, e.g. by an internal copy index — no need to show this visually per the digital simplification below), shuffle each independently, and deal 52 cards to each player from their own deck.
 
 **Per-player deal (52 cards each):**
 - Reserve: 13 cards, stacked face-down, top card face-up.
@@ -148,7 +148,7 @@ Strict separation of concerns, so the rules engine is reusable server-side for v
 /src
   /engine          <-- pure TypeScript, zero rendering/DOM dependencies
     types.ts
-    deck.ts        <-- build/shuffle the 104-card pool, deal
+    deck.ts        <-- build/shuffle each player's own 52-card deck, deal
     rules.ts       <-- legality checks: canPlayToFoundation, canPlayToHouse, canLoadPile — each returns a RejectReason on failure, not just false
     moveResolver.ts<-- computes the full legal-move set + compulsory subset for the player on turn; also exposes evaluateMove(state, move) -> MoveEvaluation for the UI to query "why is this drop invalid?" while dragging
     engine.ts       <-- applyMove(state, move) -> new state; pure, immutable-style
