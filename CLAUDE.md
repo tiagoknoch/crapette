@@ -24,17 +24,38 @@ Engine-first build (§14 steps 1–4) is complete: `/src/engine` (types, deck, r
 moveResolver, engine, winCheck) plus the headless CLI harness at `src/cli/simulate.ts`.
 Step 5, `src/ai/cpuPlayer.ts` (the §7 rule-based CPU heuristic), is also complete, with
 `simulate.ts` extended with `--heuristic-human`/`--heuristic-cpu` flags so either or
-both sides can run the heuristic instead of the original random bot. 100 Vitest tests
-passing.
+both sides can run the heuristic instead of the original random bot.
 
-Nothing under `/src/render`, `/src/ui`, or `/src/state` exists yet — no rendering, no
-persistence, no i18n wiring. `main.ts`/`index.html` are still the unmodified Vite
-scaffold. **Next up per §14: step 6**, static PixiJS rendering of a `GameState`
-snapshot, no interaction yet.
+Step 6 is also complete: `/src/render` (`layout.ts` + `pixi/cardSprites.ts` +
+`pixi/scene.ts`) renders a static `GameState` snapshot via PixiJS, letterboxed/rescaled
+to fit any viewport (no drag/drop or tap interaction yet — that's step 7). `main.ts`
+deals a fixed-seed game and renders it. 84 Vitest tests passing (render code has no
+tests yet — it's layout/visual, not logic worth unit-testing the way the engine is).
 
-The engine/AI/CLI code is still young — fields or functions with no usages elsewhere in
-the repo are safe to add, rename, or remove as the implementation is worked out; this
-isn't yet a stable public API with external callers to preserve compatibility for.
+**The actual tableau shape deviates from docs/tech-spec.md §5.** Per direct user
+direction (citing Russian Bank's traditional physical layout — see the Wikipedia
+article's setup photo), the table is NOT the spec's 5-horizontal-band layout. It's
+instead: each player's talon/waste/reserve as a 3-slot row (mirrored between the two
+players, like the physical game), and a 4×4 middle grid — one player's 4 houses as a
+vertical column, the 8 foundations as a 4×2 block, the other player's 4 houses as a
+vertical column. See the comment block at the top of `src/render/layout.ts` for the
+exact geometry. If §5's text is ever consulted for render work, prefer what's actually
+implemented in `layout.ts` — the spec doc itself hasn't been edited to match.
+
+Card art is vendored from `htdebeer/SVG-cards` (LGPL-2.1) into `public/cards/` — see
+`public/cards/CREDIT.md`. Each player's face-down piles use a different back color
+(human=blue, cpu=red, purely cosmetic, see `PLAYER_BACK_COLOR` in `cardSprites.ts`).
+Talon/waste/reserve piles draw a few cheap filler layers behind the top card to hint at
+pile depth (`stackDepthLayers` in `scene.ts`) — an impression, not an exact count.
+
+Nothing under `/src/ui` or `/src/state` exists yet — no drag/drop, no persistence, no
+i18n wiring, no HUD. **Next up per §14: step 7**, drag-and-drop + tap-to-select input
+wired to the engine, with legal-destination highlighting and compulsory-move gating.
+
+The engine/AI/CLI/render code is still young — fields or functions with no usages
+elsewhere in the repo are safe to add, rename, or remove as the implementation is
+worked out; this isn't yet a stable public API with external callers to preserve
+compatibility for.
 
 ### Known non-bug: rare simulate.ts "failure" on seed 3925 (and similar)
 
@@ -88,14 +109,17 @@ session actually rooted at this directory, not one rooted at a parent folder.
   original random-legal-move bot by default; add `--heuristic-human` and/or
   `--heuristic-cpu` to switch either side to `src/ai/cpuPlayer.ts`'s §7 heuristic
   instead (see the "known non-bug" notes below before running both flags together).
-- `npm run dev` / `npm run build` — Vite dev server / production build. Not
-  meaningful yet since `/src/render` and `/src/ui` don't exist; `main.ts` is still the
-  unmodified Vite scaffold.
+- `npm run dev` / `npm run build` — Vite dev server / production build. Renders a
+  fixed-seed static `GameState` snapshot (§14 step 6); no interaction yet since
+  `/src/ui` doesn't exist.
 
 ## Conventions
 
 - No TS `enum` — use string-literal union types (`erasableSyntaxOnly` is set in
   `tsconfig.json`), matching the spec's data model style.
 - Vitest tests are colocated next to the module they test (`foo.ts` + `foo.test.ts`).
-- The CLI harness (`src/cli/simulate.ts`) imports only from `/src/engine` — no
-  rendering, UI, or AI-heuristic code exists yet in this build phase.
+- The CLI harness (`src/cli/simulate.ts`) imports only from `/src/engine` and
+  `/src/ai` — no rendering/UI code.
+- `src/render/layout.ts` is pure geometry with zero Pixi imports (mirrors the
+  `/src/engine` purity rule, one level down); actual PixiJS usage is confined to
+  `src/render/pixi/`.
