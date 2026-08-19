@@ -20,20 +20,19 @@ it for convenience.
 
 ## Project status
 
-Engine-first build (§14 steps 1–4) is complete and committed (initial commit
-`e730ce7`): `/src/engine` (types, deck, rules, moveResolver, engine, winCheck) plus
-the headless CLI harness at `src/cli/simulate.ts`, all covered by Vitest (73 tests
-passing). Validated with `npm run simulate -- --games 5000` (~70s, 0 unexpected
-failures, 104-card conservation checked after every move).
+Engine-first build (§14 steps 1–4) is complete: `/src/engine` (types, deck, rules,
+moveResolver, engine, winCheck) plus the headless CLI harness at `src/cli/simulate.ts`.
+Step 5, `src/ai/cpuPlayer.ts` (the §7 rule-based CPU heuristic), is also complete, with
+`simulate.ts` extended with `--heuristic-human`/`--heuristic-cpu` flags so either or
+both sides can run the heuristic instead of the original random bot. 100 Vitest tests
+passing.
 
-Nothing under `/src/ai`, `/src/render`, `/src/ui`, or `/src/state` exists yet — no
-rendering, no CPU heuristic AI, no persistence, no i18n wiring. `main.ts`/`index.html`
-are still the unmodified Vite scaffold. **Next up per §14: step 5, `cpuPlayer.ts`**,
-tested against the `simulate.ts` harness (swap the harness's random choices for the
-heuristic where useful), then step 6 (static PixiJS rendering of a `GameState`
-snapshot, no interaction yet).
+Nothing under `/src/render`, `/src/ui`, or `/src/state` exists yet — no rendering, no
+persistence, no i18n wiring. `main.ts`/`index.html` are still the unmodified Vite
+scaffold. **Next up per §14: step 6**, static PixiJS rendering of a `GameState`
+snapshot, no interaction yet.
 
-The engine/CLI code is still young — fields or functions with no usages elsewhere in
+The engine/AI/CLI code is still young — fields or functions with no usages elsewhere in
 the repo are safe to add, rename, or remove as the implementation is worked out; this
 isn't yet a stable public API with external callers to preserve compatibility for.
 
@@ -51,6 +50,26 @@ the signature repeated exactly every ~2000 moves. Don't "fix" this by making the
 harness smarter; it's deliberately dumb/uniform-random per the brief. If it starts
 happening much more often than ~1-in-thousands, that would be worth re-investigating.
 
+### Known non-bug: rare simulate.ts "failure" on seed 885 with `--heuristic-human --heuristic-cpu`
+
+Same `MAX_MOVES_PER_GAME` cap, same ~1-in-5000 rarity, different mechanism, and
+**only reachable in this specific harness configuration** — running the deterministic
+`cpuPlayer.ts` heuristic on *both* sides at once. Investigated: the two fully
+deterministic policies can lock into a repeating macro-cycle spanning a full
+hand/waste rotation (e.g. one side draws a card, plays it to one of its own houses,
+then discards its next draw ending the turn; the other side immediately loads that
+exact card off the house onto the first side's own waste pile and passes; repeat for
+the next card in hand, and so on until the hand/waste reshuffles and the identical
+sequence recurs) — confirmed via a throwaway script logging the move sequence leading
+into the cap. `--heuristic-cpu` alone and `--heuristic-human` alone are each clean
+across 5000 seeds (0 failures) — this cycle needs *both* sides playing the exact same
+deterministic policy with no randomness anywhere to break the symmetry, which never
+happens in actual v1 play (the human side is a real person, not a second copy of the
+CPU's policy). Don't chase this with more scoring heuristics in `cpuPlayer.ts` or add
+cycle-detection machinery for a configuration the shipped game never exercises;
+`--heuristic-human --heuristic-cpu` remains available in the harness for CPU-heuristic
+regression testing, just expect this same ~1-in-5000 rate.
+
 ## Local environment note
 
 `.claude/settings.local.json` (gitignored, not committed) disables the
@@ -62,10 +81,13 @@ session actually rooted at this directory, not one rooted at a parent folder.
 ## Commands
 
 - `npm run test` — run the Vitest suite (engine only, for now).
-- `npm run simulate -- --games <n>` — headless random-legal-move simulation via
-  `src/cli/simulate.ts`; the fastest way to shake out engine bugs. Defaults to 1 game
-  (prints the final state and move log); pass `--games 1000`+ for a batch summary
-  (win/stalemate/failure counts, a 104-card conservation check after every move).
+- `npm run simulate -- --games <n>` — headless simulation via `src/cli/simulate.ts`;
+  the fastest way to shake out engine/AI bugs. Defaults to 1 game (prints the final
+  state and move log); pass `--games 1000`+ for a batch summary (win/stalemate/failure
+  counts, a 104-card conservation check after every move). Both sides play the
+  original random-legal-move bot by default; add `--heuristic-human` and/or
+  `--heuristic-cpu` to switch either side to `src/ai/cpuPlayer.ts`'s §7 heuristic
+  instead (see the "known non-bug" notes below before running both flags together).
 - `npm run dev` / `npm run build` — Vite dev server / production build. Not
   meaningful yet since `/src/render` and `/src/ui` don't exist; `main.ts` is still the
   unmodified Vite scaffold.
