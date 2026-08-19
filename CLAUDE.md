@@ -48,13 +48,32 @@ Card art is vendored from `htdebeer/SVG-cards` (LGPL-2.1) into `public/cards/` �
 Talon/waste/reserve piles draw a few cheap filler layers behind the top card to hint at
 pile depth (`stackDepthLayers` in `scene.ts`) — an impression, not an exact count.
 
-Nothing under `/src/ui` or `/src/state` exists yet — no drag/drop, no persistence, no
-i18n wiring, no HUD. **Next up per §14: step 7**, drag-and-drop + tap-to-select input
-wired to the engine, with legal-destination highlighting and compulsory-move gating.
+Step 7 is also complete: `src/state/gameStore.ts` owns the mutable `GameState`, the
+current selection, and a transient rejection "flash". `handleSlotClick` is the single
+entry point every pile click resolves through — click a card to pick it up, click a
+destination to attempt the move, click your own waste while a drawn hand card is
+selected to discard it. Draw is just clicking your own face-down talon.
 
-The engine/AI/CLI/render code is still young — fields or functions with no usages
-elsewhere in the repo are safe to add, rename, or remove as the implementation is
-worked out; this isn't yet a stable public API with external callers to preserve
+**Input is deliberately reactive-only, per direct user direction — not what
+tech-spec.md §6 describes.** §6 says legal destinations should be highlighted on
+drag-start and illegal ones rejected on drop. Instead: nothing is ever highlighted or
+pre-disabled (no legal-move hints, no greyed-out draw button) — every action is
+attempted, and only rejected attempts get feedback (a red flash on the attempted
+destination + a reason banner at the top, ~900ms, see `REASON_TEXT` in
+`gameStore.ts`). Finding the play is the player's job; a hint-mode toggle is a
+plausible future option but isn't built. `scene.ts` also gained a persistent
+interactive layer (built once, independent of the card layer that's rebuilt every
+render) so every slot — including empty ones — is clickable via Pixi's `pointertap`.
+
+CPU-side automatic play (`cpuPlayer.ts` on a timer, alternating with human input) is
+**not** wired in yet — both seats are click-driven for now, purely so step 7's
+interaction could be verified end to end. That alternation is step 8, next per §14.
+
+Nothing under `/src/ui` exists yet — no HUD, no persistence, no i18n wiring.
+
+The engine/AI/CLI/render/state code is still young — fields or functions with no
+usages elsewhere in the repo are safe to add, rename, or remove as the implementation
+is worked out; this isn't yet a stable public API with external callers to preserve
 compatibility for.
 
 ### Known non-bug: rare simulate.ts "failure" on seed 3925 (and similar)
