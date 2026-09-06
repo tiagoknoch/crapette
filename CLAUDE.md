@@ -159,11 +159,29 @@ by a direct `render()` call. **About/Legal modal**: a persistent "About / Legal"
 link toggles a static modal (`drawAboutModal`, built once, visibility toggled) with the
 §12-required credits (SVG-cards LGPL-2.1, PixiJS, Vite/TypeScript/Vitest) — this is pure
 presentation with no `GameState` involvement, so it lives outside the gameStore/
-`renderGameState` pipeline entirely, unlike everything else in this file. Per the
-established pattern of not yet doing i18n (that's still step 10, undone), all of this HUD
-text is hardcoded English, same as `REASON_TEXT`/`turnLabel` already were.
+`renderGameState` pipeline entirely, unlike everything else in this file.
 
-Nothing under `/src/ui` exists yet — no persistence, no i18n wiring.
+Step 10 is also complete: `/src/i18n` (`index.ts` + `locales/en.ts` + `locales/pt.ts`)
+wires up `i18next` with inline bundled resources — no HTTP backend/loader, since this is
+a small static site and every locale's strings just ship in the JS bundle. No
+`i18next-browser-languagedetector` dependency either; `detectLanguage()` in
+`src/i18n/index.ts` does a one-shot `navigator.language` check at startup instead (falls
+back to `en` for anything not in `SUPPORTED_LANGUAGES`). `main.ts` calls `initI18n()`
+(awaited) before the first `initGameStore`/render. Every player-facing string that used
+to be hardcoded — `REASON_TEXT` in `gameStore.ts` (now `REASON_KEY`, mapping each
+`UiRejectReason` to a translation key resolved via `i18next.t()` at flash-creation time,
+not render time — acceptable since there's no live language switcher yet and a flash is
+short-lived anyway), plus `scene.ts`'s turn indicator/footer link/About modal/end-screen
+text — now goes through `i18next.t()`. `locales/pt.ts` is typed `satisfies typeof en`
+(not `: typeof en`) so it keeps literal string types while still failing to compile if a
+key is missing or misspelled relative to `en.ts`. There's no in-app language switcher UI
+yet (not required for v1 — the requirement was externalizing/making strings swappable,
+not necessarily user-facing switching); `footerLink`'s and the About modal's text are
+built once in `createTableScene` rather than re-resolved every render, so if a switcher
+is added later those two would need to be redrawn on language change same as everything
+already inside `renderGameState` is.
+
+Nothing under `/src/ui` exists yet — no `localStorage` persistence/autosave (step 11).
 
 The engine/AI/CLI/render/state code is still young — fields or functions with no
 usages elsewhere in the repo are safe to add, rename, or remove as the implementation

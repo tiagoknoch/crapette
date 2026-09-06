@@ -1,5 +1,6 @@
 import './style.css';
 import { deal } from './engine/deck.ts';
+import { initI18n } from './i18n/index.ts';
 import { createTableScene, renderGameState } from './render/pixi/scene.ts';
 import { cpuStep, getFlash, getSelected, getState, handleSlotClick, initGameStore, subscribe } from './state/gameStore.ts';
 
@@ -22,6 +23,7 @@ async function main(): Promise<void> {
   const container = document.querySelector<HTMLDivElement>('#app');
   if (!container) throw new Error('#app container missing from index.html');
 
+  await initI18n();
   initGameStore(deal(makeSeededRng(1)));
 
   let render = (): void => {};

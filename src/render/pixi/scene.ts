@@ -6,6 +6,7 @@
 // entirely gameStore.ts's call — deliberately reactive-only, no legal-destination
 // highlighting or preemptive disabling (see gameStore.ts's file comment for why).
 import { Application, Container, Graphics, type Sprite, Text } from 'pixi.js';
+import { i18next } from '../../i18n/index.ts';
 import type { Card, GameState, PileRef, PlayerId } from '../../engine/types.ts';
 import {
   CARD_HEIGHT,
@@ -63,17 +64,6 @@ const FOOTER_LINK_Y_OFFSET = -20;
 const ABOUT_PANEL_WIDTH = 560;
 const ABOUT_PANEL_HEIGHT = 300;
 const ABOUT_PANEL_COLOR = 0x143a2b;
-const ABOUT_BODY_TEXT = [
-  'Crapette — a web implementation of Russian Bank.',
-  '',
-  'Third-party credits:',
-  '• Card art: SVG-cards by Huub de Beer (LGPL-2.1)',
-  '  github.com/htdebeer/SVG-cards',
-  '• Rendering: PixiJS (MIT License) — pixijs.com',
-  '• Built with Vite, TypeScript, and Vitest (MIT License)',
-  '',
-  "This project's own source license has not been published yet.",
-].join('\n');
 
 export interface FeedbackFlash {
   ref: PileRef;
@@ -193,7 +183,7 @@ export async function createTableScene(container: HTMLElement, onSlotClick: Slot
   // gameStore/renderGameState pipeline; it just adds its own layer on top of everything else
   // and toggles that layer's visibility directly.
   const footerLink = new Text({
-    text: 'About / Legal',
+    text: i18next.t('footer.aboutLegal'),
     style: { fill: 0xbbbbbb, fontSize: 14 },
   });
   footerLink.anchor.set(0.5);
@@ -297,11 +287,11 @@ function drawAboutModal(layer: Container, onClose: () => void): void {
   panel.eventMode = 'static'; // swallow taps so clicking the panel itself doesn't close it via the backdrop
   layer.addChild(panel);
 
-  const title = new Text({ text: 'About & Legal', style: { fill: 0xffffff, fontSize: 22, fontWeight: 'bold' } });
+  const title = new Text({ text: i18next.t('about.title'), style: { fill: 0xffffff, fontSize: 22, fontWeight: 'bold' } });
   title.position.set(panelX + 24, panelY + 20);
   layer.addChild(title);
 
-  const body = new Text({ text: ABOUT_BODY_TEXT, style: { fill: 0xe5e5e5, fontSize: 14, lineHeight: 20 } });
+  const body = new Text({ text: i18next.t('about.body'), style: { fill: 0xe5e5e5, fontSize: 14, lineHeight: 20 } });
   body.position.set(panelX + 24, panelY + 62);
   layer.addChild(body);
 
@@ -315,10 +305,11 @@ function drawAboutModal(layer: Container, onClose: () => void): void {
 }
 
 function endScreenTitle(state: GameState): string {
-  if (state.status === 'won' && state.winner) return state.winner === 'human' ? 'You won!' : 'CPU won!';
+  if (state.status === 'won' && state.winner) return i18next.t(state.winner === 'human' ? 'end.youWon' : 'end.cpuWon');
   if (state.status === 'stalemate') {
-    if (!state.winner) return 'Stalemate';
-    return `Stalemate — ${state.winner === 'human' ? 'you win' : 'CPU wins'}`;
+    if (!state.winner) return i18next.t('end.stalemate');
+    const winner = i18next.t(state.winner === 'human' ? 'end.stalemateHumanWins' : 'end.stalemateCpuWins');
+    return i18next.t('end.stalemateWinner', { winner });
   }
   return '';
 }
@@ -337,7 +328,7 @@ function drawEndScreen(layer: Container, state: GameState, onPlayAgain: () => vo
   layer.addChild(title);
 
   const scores = state.scores;
-  const scoreLine = scores ? `You: ${scores.human} pts   ·   CPU: ${scores.cpu} pts` : '';
+  const scoreLine = scores ? i18next.t('end.scoreLine', { human: scores.human, cpu: scores.cpu }) : '';
   const scoreText = new Text({ text: scoreLine, style: { fill: 0xffe28a, fontSize: 20, align: 'center' } });
   scoreText.anchor.set(0.5);
   scoreText.position.set(centerX, centerY + OVERLAY_SCORE_Y_OFFSET);
@@ -352,7 +343,7 @@ function drawEndScreen(layer: Container, state: GameState, onPlayAgain: () => vo
   button.on('pointertap', onPlayAgain);
   layer.addChild(button);
 
-  const buttonText = new Text({ text: 'Play Again', style: { fill: 0xffffff, fontSize: 18, fontWeight: 'bold' } });
+  const buttonText = new Text({ text: i18next.t('end.playAgain'), style: { fill: 0xffffff, fontSize: 18, fontWeight: 'bold' } });
   buttonText.anchor.set(0.5);
   buttonText.position.set(centerX, buttonY);
   layer.addChild(buttonText);
@@ -452,7 +443,7 @@ function drawPlayerRow(layer: Container, state: GameState, player: PlayerId, row
 // this only ever needs to say whose turn it currently is.
 function turnLabel(state: GameState): string {
   if (state.status !== 'in_progress') return '';
-  return state.turn === 'human' ? 'Your turn' : "CPU's turn";
+  return i18next.t(state.turn === 'human' ? 'turn.human' : 'turn.cpu');
 }
 
 export function renderGameState(scene: TableScene, state: GameState, selected: PileRef | null, flash: FeedbackFlash | null): void {

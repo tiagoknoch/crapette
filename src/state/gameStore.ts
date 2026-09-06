@@ -14,19 +14,20 @@ import { applyMove, discardDrawnCardToWaste, drawFromHand, passTurn, startTurn }
 import { canDrawHand, evaluateMove, getAvailableSources, getLegalMoves, hasEmptyHouse } from '../engine/moveResolver.ts';
 import type { Card, GameState, Move, PileRef, PlayerId, RejectReason } from '../engine/types.ts';
 import { checkStalemate, checkWin } from '../engine/winCheck.ts';
+import { i18next } from '../i18n/index.ts';
 
 export type UiRejectReason = RejectReason | 'must-fill-empty-house' | 'nothing-to-draw' | 'cannot-draw-yet';
 
-export const REASON_TEXT: Record<UiRejectReason, string> = {
-  'wrong-suit-sequence': "Doesn't match that foundation's suit/sequence",
-  'wrong-house-sequence': "Doesn't fit that house (needs descending rank, alternating color)",
-  'wrong-load-match': "Doesn't match that pile's suit and rank (±1)",
-  'not-available': "That card isn't available to move",
-  'compulsory-move-pending': 'A forced move must be played first',
-  'forbidden-destination': "You can't place a card there",
-  'must-fill-empty-house': 'Fill the empty house from your reserve first',
-  'nothing-to-draw': "There's nothing left to draw",
-  'cannot-draw-yet': "You can't draw a card right now",
+const REASON_KEY: Record<UiRejectReason, string> = {
+  'wrong-suit-sequence': 'reject.wrongSuitSequence',
+  'wrong-house-sequence': 'reject.wrongHouseSequence',
+  'wrong-load-match': 'reject.wrongLoadMatch',
+  'not-available': 'reject.notAvailable',
+  'compulsory-move-pending': 'reject.compulsoryMovePending',
+  'forbidden-destination': 'reject.forbiddenDestination',
+  'must-fill-empty-house': 'reject.mustFillEmptyHouse',
+  'nothing-to-draw': 'reject.nothingToDraw',
+  'cannot-draw-yet': 'reject.cannotDrawYet',
 };
 
 export interface Flash {
@@ -111,8 +112,9 @@ function notify(): void {
 }
 
 function showReject(ref: PileRef, reason: UiRejectReason): void {
-  flash = { ref, message: REASON_TEXT[reason] };
-  log('rejected:', pileLabel(ref), '—', REASON_TEXT[reason]);
+  const message = i18next.t(REASON_KEY[reason]);
+  flash = { ref, message };
+  log('rejected:', pileLabel(ref), '—', message);
   clearTimeout(flashTimeout);
   flashTimeout = setTimeout(() => {
     flash = null;
