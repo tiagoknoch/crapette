@@ -56,7 +56,7 @@ const en = {
       '• Rendering: PixiJS (MIT License) — pixijs.com',
       '• Built with Vite, TypeScript, and Vitest (MIT License)',
       '',
-      "This project's own source license has not been published yet.",
+      "This project's own source code is MIT licensed.",
     ].join('\n'),
   },
   rules: {

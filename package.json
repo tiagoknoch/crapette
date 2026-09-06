@@ -2,6 +2,7 @@
   "name": "crapette",
   "private": true,
   "version": "0.0.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,6 +19,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "i18next": "^26.3.6",
     "pixi.js": "^8.19.0"
   }

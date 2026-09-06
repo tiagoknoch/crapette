@@ -1,4 +1,5 @@
 import './style.css';
+import { inject } from '@vercel/analytics';
 import { deal } from './engine/deck.ts';
 import type { GameState } from './engine/types.ts';
 import { i18next, initI18n } from './i18n/index.ts';
@@ -129,5 +130,12 @@ async function main(): Promise<void> {
 
   setInterval(cpuStep, CPU_TICK_MS);
 }
+
+// Vercel Web Analytics — framework-agnostic `inject()`, not the `/next` or `/react`
+// component (this is a Vite/vanilla-TS app, not Next.js/React). Only actually sends data
+// once deployed on Vercel with Web Analytics enabled for the project; it's a no-op
+// (logs to console instead) in local dev. See docs/known-issues.md if this ever needs
+// revisiting.
+inject();
 
 main();

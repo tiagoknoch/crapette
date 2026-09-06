@@ -58,7 +58,7 @@ const pt = {
       '• Renderização: PixiJS (Licença MIT) — pixijs.com',
       '• Construído com Vite, TypeScript e Vitest (Licença MIT)',
       '',
-      'A licença do código-fonte deste projeto ainda não foi publicada.',
+      'O código-fonte deste projeto está sob a licença MIT.',
     ].join('\n'),
   },
   rules: {
