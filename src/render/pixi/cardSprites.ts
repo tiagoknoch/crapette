@@ -52,9 +52,16 @@ function allFaceKeys(): string[] {
 
 // Loads every face + both player back colors into Pixi's texture cache, keyed by
 // faceKey()/backKey(), so createCardSprite below can synchronously look them up.
+//
+// The vendored PNGs are much higher-resolution (338×489) than a card is ever drawn on
+// table (CARD_WIDTH/CARD_HEIGHT, ~80×116 logical px) — without mipmaps, that minification
+// ratio aliases the art's fine detail (crosshatching, small print) into visible speckle/
+// noise, since WebGL's non-mipmapped linear filtering only samples the full-resolution
+// texture. autoGenerateMipmaps fixes that by letting the GPU sample from a properly
+// downsampled mip level instead.
 export async function preloadCardTextures(): Promise<void> {
   const keys = [...allFaceKeys(), backKey('human'), backKey('cpu')];
-  Assets.add(keys.map((key) => ({ alias: key, src: `/cards/${key}.png` })));
+  Assets.add(keys.map((key) => ({ alias: key, src: `/cards/${key}.png`, data: { autoGenerateMipmaps: true } })));
   await Assets.load(keys);
 }
 
