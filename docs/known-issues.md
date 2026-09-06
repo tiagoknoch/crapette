@@ -88,6 +88,39 @@ recoverable while that exact browser tab/session is still open). Deliberately ke
 `GameState`/`/src/engine` — `deal()` only ever takes a `random: () => number`, stays
 seed-agnostic per the engine purity rule; the seed is pure tooling living in `main.ts`.
 
+## Fixed: clicking an empty draw pile did nothing — stuck once the hand emptied mid-turn
+
+**Symptom**: a user reported their draw pile was empty and they couldn't reshuffle to
+continue — the game appeared stuck.
+
+**Root cause**: the actual reshuffle-from-waste logic (`drawFromHand` in `engine.ts`) was
+correct all along — it already reshuffles the waste pile into the hand whenever the hand
+is empty at draw time, no separate flag needed. The bug was in the UI's click routing:
+`gameStore.ts`'s `isOwnFaceDownTalon` (the check that decides whether clicking a pile
+should attempt a draw) required `topCardOf(state, ref)` to return an actual card and be
+face-down — `!top.faceUp`. When the hand pile is completely empty, `topCardOf` returns
+`undefined`, so this check was always false. `isSelectableSource` doesn't cover an empty
+hand either (`getAvailableSources` only includes the hand when it has a face-up top
+card). Net effect: once a player's hand pile actually reached zero cards — most commonly
+by playing their *last* hand card via a real move rather than discarding it, which never
+sets the `needsHandReshuffle` flag `startTurn()`'s automatic reshuffle relies on — there
+was no click that could ever reach `drawFromHand`, leaving the player stuck with a
+visibly empty draw pile and a non-empty waste pile they could never get to.
+
+**Fix**: renamed to `isOwnHandDrawTarget` and changed the check to
+`top === undefined || !top.faceUp` — an empty own-hand pile is now just as valid a draw
+target as a face-down one. `attemptDraw`/`canDrawHand`/`drawFromHand` already handled the
+empty-hand-reshuffle case correctly; they just needed the click to actually reach them.
+If both hand and waste are genuinely empty, the existing `canDrawHand` gate still
+correctly rejects the attempt with `reject.nothingToDraw` rather than doing nothing
+silently.
+
+**Verified** end-to-end via a constructed save (`human.hand: []`, `human.waste`: 3 cards)
+loaded through the real Resume flow: clicking the empty hand pile logged
+`human draws 5♠`, reshuffled all 3 waste cards back into hand (waste emptied, hand went
+0→3), and rendered correctly (waste pile empty, hand showing the newly drawn card
+face-up). `npm run test` (92 tests) and `tsc --noEmit` were both clean after the change.
+
 ## Known limitation: mobile touch targets slightly under the 44×44px guideline
 
 The letterboxed scale on common phone portrait sizes (e.g. 375×667, 390×844) comes out

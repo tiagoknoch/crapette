@@ -179,10 +179,21 @@ function isSelectableSource(ref: PileRef, mover: PlayerId): boolean {
   return getAvailableSources(state, mover).some((s) => refsEqual(s.from, ref));
 }
 
-function isOwnFaceDownTalon(ref: PileRef, mover: PlayerId): boolean {
+// A click on the player's own hand pile always attempts a draw — whether that pile
+// currently shows a face-down card (the normal case) or is empty (canDrawHand/drawFromHand
+// then decide what happens: reshuffle waste back into hand and draw if waste has cards,
+// or a "nothing to draw" rejection if it's truly empty too). Real bug this fixed: an empty
+// hand pile used to fail this check entirely (topCardOf returns undefined, so the old
+// `top !== undefined && !top.faceUp` was false), meaning clicking it did nothing at all —
+// isSelectableSource also excludes an empty hand (getAvailableSources requires a face-up
+// top card), so there was no click that could ever reach drawFromHand's own reshuffle
+// logic, leaving the player stuck once their hand pile emptied mid-turn (e.g. by playing
+// their last hand card via a real move rather than a discard, so needsHandReshuffle was
+// never set and startTurn()'s automatic reshuffle never had a reason to run either).
+function isOwnHandDrawTarget(ref: PileRef, mover: PlayerId): boolean {
   if (ref.type !== 'hand' || ref.owner !== mover) return false;
   const top = topCardOf(state, ref);
-  return top !== undefined && !top.faceUp;
+  return top === undefined || !top.faceUp;
 }
 
 function performDiscard(mover: PlayerId): void {
@@ -376,7 +387,7 @@ export function handleSlotClick(ref: PileRef): void {
   const mover = state.turn;
 
   if (selected === null) {
-    if (isOwnFaceDownTalon(ref, mover)) {
+    if (isOwnHandDrawTarget(ref, mover)) {
       attemptDraw(mover);
     } else if (isSelectableSource(ref, mover)) {
       selected = ref;
