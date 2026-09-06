@@ -42,11 +42,28 @@ vertical column. See the comment block at the top of `src/render/layout.ts` for 
 exact geometry. If §5's text is ever consulted for render work, prefer what's actually
 implemented in `layout.ts` — the spec doc itself hasn't been edited to match.
 
-Card art is vendored from `htdebeer/SVG-cards` (LGPL-2.1) into `public/cards/` — see
-`public/cards/CREDIT.md`. Each player's face-down piles use a different back color
-(human=blue, cpu=red, purely cosmetic, see `PLAYER_BACK_COLOR` in `cardSprites.ts`).
-Talon/waste/reserve piles draw a few cheap filler layers behind the top card to hint at
-pile depth (`stackDepthLayers` in `scene.ts`) — an impression, not an exact count.
+Card art is vendored from `htdebeer/SVG-cards` (LGPL-2.1) into `public/cards/` as genuine
+per-card SVG files (not §12's originally-chosen pre-rendered PNGs — switched after manual
+play-testing found the fixed 338×489 PNG resolution visibly blurred/aliased once cards
+were sized differently; see `public/cards/CREDIT.md` for how each standalone SVG was
+extracted from the upstream project's single combined sheet, and `SVG_RASTER_RESOLUTION`
+in `cardSprites.ts` for the rasterization target). Each player's face-down piles use a
+different back color (human=blue, cpu=red, purely cosmetic — done via an SVG `fill`
+override on the back design rather than one of the upstream's 16 pre-baked back-color
+assets, see `PLAYER_BACK_COLOR` in `cardSprites.ts`). Talon/waste/reserve piles draw a few
+cheap filler layers behind the top card to hint at pile depth (`stackDepthLayers` in
+`scene.ts`) — an impression, not an exact count (superseded for exact counts by the §14
+step 9 pile-count badges, see below).
+
+`createTableScene`'s `app.init` call also now sets `resolution: window.devicePixelRatio`
++ `autoDensity: true` (found alongside the above) — Pixi's renderer defaults `resolution`
+to 1 regardless of screen density, meaning on any retina/high-DPI display the *entire*
+canvas (not just card art) was being rendered at a lower pixel density than the screen
+and then upscaled by the browser, independent of any texture's own resolution.
+
+`CARD_WIDTH` in `layout.ts` was bumped 80→96 per direct user direction ("make the cards a
+bit bigger") — everything else in `layout.ts` derives from it, so this alone rescales the
+whole table proportionally.
 
 Step 7 is also complete: `src/state/gameStore.ts` owns the mutable `GameState`, the
 current selection, and a transient rejection "flash". `handleSlotClick` is the single

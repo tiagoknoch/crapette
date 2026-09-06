@@ -135,7 +135,17 @@ function effectiveSlotPoint(state: GameState, ref: PileRef): Point | undefined {
 
 export async function createTableScene(container: HTMLElement, onSlotClick: SlotClickHandler, onPlayAgain: () => void): Promise<TableScene> {
   const app = new Application();
-  await app.init({ resizeTo: window, backgroundColor: TABLE_BG_COLOR, antialias: true });
+  // `resolution` defaults to 1 (CSS px per physical px) — on any high-DPI/retina screen that
+  // renders the whole canvas at a lower density than the display, then lets the browser
+  // upscale it, blurring everything (not just card art). `autoDensity` keeps the canvas's CSS
+  // size correct once `resolution` inflates its backing store.
+  await app.init({
+    resizeTo: window,
+    backgroundColor: TABLE_BG_COLOR,
+    antialias: true,
+    resolution: window.devicePixelRatio || 1,
+    autoDensity: true,
+  });
   container.appendChild(app.canvas);
 
   await preloadCardTextures();

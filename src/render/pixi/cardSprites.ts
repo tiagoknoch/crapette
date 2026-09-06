@@ -1,9 +1,19 @@
 // §12/§14 step 6: turns a Card into a Pixi Sprite using the vendored htdebeer/SVG-cards art
 // (public/cards/, LGPL-2.1 — see public/cards/CREDIT.md). This is the only place that knows
 // the card-art filename convention.
+//
+// Each file here is a standalone, self-contained SVG (extracted from the upstream project's
+// single combined svg-cards.svg sheet — every card is a <use> onto a small closure of shared
+// <defs>, not a separate drawing — see public/cards/CREDIT.md for how these were produced).
+// Genuine vector art, not a pre-rasterized PNG: Pixi's SVG loader rasterizes each one to a
+// texture at SVG_RASTER_RESOLUTION× its natural size (169×245), comfortably above any size a
+// card is actually drawn at, so it stays crisp regardless of how big CARD_WIDTH/CARD_HEIGHT
+// (layout.ts) end up being — unlike a fixed-resolution PNG, which blurs past its native size.
 import { Assets, Sprite } from 'pixi.js';
 import type { Card, PlayerId, Rank, Suit } from '../../engine/types.ts';
 import { CARD_HEIGHT, CARD_WIDTH } from '../layout.ts';
+
+const SVG_RASTER_RESOLUTION = 3;
 
 // §12: "16 pre-made card-back colors, which conveniently covers the optional cosmetic
 // distinction between the two players' reserve/hand piles" — purely cosmetic, no gameplay
@@ -54,7 +64,7 @@ function allFaceKeys(): string[] {
 // faceKey()/backKey(), so createCardSprite below can synchronously look them up.
 export async function preloadCardTextures(): Promise<void> {
   const keys = [...allFaceKeys(), backKey('human'), backKey('cpu')];
-  Assets.add(keys.map((key) => ({ alias: key, src: `/cards/${key}.png` })));
+  Assets.add(keys.map((key) => ({ alias: key, src: `/cards/${key}.svg`, data: { resolution: SVG_RASTER_RESOLUTION } })));
   await Assets.load(keys);
 }
 

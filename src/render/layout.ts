@@ -6,9 +6,11 @@
 // Kept free of Pixi imports — it's just geometry, easy to unit-test independent of rendering.
 import type { PlayerId } from '../engine/types.ts';
 
-// The source card art (htdebeer/SVG-cards, see public/cards/CREDIT.md) is 338×489.
-export const CARD_ASPECT = 489 / 338;
-export const CARD_WIDTH = 80;
+// The source card art's natural size (htdebeer/SVG-cards, see public/cards/CREDIT.md) is
+// 169.075×244.64 — this is that aspect ratio, not a pixel size (the art is vector, rasterized
+// at whatever size cardSprites.ts asks for, so there's no fixed native resolution to match).
+export const CARD_ASPECT = 244.64 / 169.075;
+export const CARD_WIDTH = 96;
 export const CARD_HEIGHT = Math.round(CARD_WIDTH * CARD_ASPECT);
 
 // Horizontal peek per stacked card in a house (matches the Wikipedia setup photo — houses
