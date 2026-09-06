@@ -38,6 +38,42 @@ const FLASH_FILL_ALPHA = 0.45;
 const FEEDBACK_TEXT_Y = 26;
 const TURN_TEXT_Y = 54;
 
+// §14 step 9: a small badge showing exactly how many cards are in a pile — pile counts are
+// a HUD feature distinct from stackDepthLayers' *impression* of depth (that's cosmetic only,
+// never an exact count). Anchored to each pile's fixed base slot (not a fanned house's
+// shifting top-card position), bottom-right corner, so it never moves as the pile changes.
+const COUNT_BADGE_RADIUS = 11;
+const COUNT_BADGE_COLOR = 0x000000;
+const COUNT_BADGE_ALPHA = 0.65;
+
+// §14 step 9: end-of-game overlay + its "Play Again" button.
+const OVERLAY_BG_COLOR = 0x000000;
+const OVERLAY_BG_ALPHA = 0.72;
+const OVERLAY_TITLE_Y_OFFSET = -40;
+const OVERLAY_SCORE_Y_OFFSET = 6;
+const OVERLAY_BUTTON_Y_OFFSET = 60;
+const PLAY_AGAIN_BUTTON_WIDTH = 170;
+const PLAY_AGAIN_BUTTON_HEIGHT = 46;
+const PLAY_AGAIN_BUTTON_COLOR = 0x2f8f5b;
+
+// §14 step 9: footer link + the About/Legal modal it opens (LGPL-2.1 attribution for the
+// vendored card art per §12 — see public/cards/CREDIT.md).
+const FOOTER_LINK_Y_OFFSET = -20;
+const ABOUT_PANEL_WIDTH = 560;
+const ABOUT_PANEL_HEIGHT = 300;
+const ABOUT_PANEL_COLOR = 0x143a2b;
+const ABOUT_BODY_TEXT = [
+  'Crapette — a web implementation of Russian Bank.',
+  '',
+  'Third-party credits:',
+  '• Card art: SVG-cards by Huub de Beer (LGPL-2.1)',
+  '  github.com/htdebeer/SVG-cards',
+  '• Rendering: PixiJS (MIT License) — pixijs.com',
+  '• Built with Vite, TypeScript, and Vitest (MIT License)',
+  '',
+  "This project's own source license has not been published yet.",
+].join('\n');
+
 export interface FeedbackFlash {
   ref: PileRef;
   message: string;
@@ -49,9 +85,11 @@ export interface TableScene {
   app: Application;
   root: Container; // logical space; scaled + centered on resize (letterboxed)
   cardsLayer: Container; // cleared and rebuilt on every renderGameState call
+  overlayLayer: Container; // end-of-game overlay, cleared and rebuilt on every renderGameState call
   feedbackText: Text;
   turnText: Text;
   onSlotClick: SlotClickHandler;
+  onPlayAgain: () => void;
 }
 
 interface Slot {
@@ -95,7 +133,7 @@ function effectiveSlotPoint(state: GameState, ref: PileRef): Point | undefined {
   return { x: base.x + Math.max(count - 1, 0) * sign * HOUSE_OVERLAP_X, y: base.y };
 }
 
-export async function createTableScene(container: HTMLElement, onSlotClick: SlotClickHandler): Promise<TableScene> {
+export async function createTableScene(container: HTMLElement, onSlotClick: SlotClickHandler, onPlayAgain: () => void): Promise<TableScene> {
   const app = new Application();
   await app.init({ resizeTo: window, backgroundColor: TABLE_BG_COLOR, antialias: true });
   container.appendChild(app.canvas);
@@ -113,6 +151,9 @@ export async function createTableScene(container: HTMLElement, onSlotClick: Slot
   const cardsLayer = new Container();
   root.addChild(cardsLayer);
 
+  const overlayLayer = new Container();
+  root.addChild(overlayLayer);
+
   const feedbackText = new Text({
     text: '',
     style: { fill: 0xffe28a, fontSize: 20, fontWeight: 'bold', align: 'center' },
@@ -129,6 +170,30 @@ export async function createTableScene(container: HTMLElement, onSlotClick: Slot
   turnText.position.set(LOGICAL_WIDTH / 2, TURN_TEXT_Y);
   root.addChild(turnText);
 
+  // §14 step 9: a persistent footer link that toggles a static About/Legal modal — this is
+  // pure presentation with no game-state involvement, so it lives entirely outside the
+  // gameStore/renderGameState pipeline; it just adds its own layer on top of everything else
+  // and toggles that layer's visibility directly.
+  const footerLink = new Text({
+    text: 'About / Legal',
+    style: { fill: 0xbbbbbb, fontSize: 14 },
+  });
+  footerLink.anchor.set(0.5);
+  footerLink.position.set(LOGICAL_WIDTH / 2, LOGICAL_HEIGHT + FOOTER_LINK_Y_OFFSET);
+  footerLink.eventMode = 'static';
+  footerLink.cursor = 'pointer';
+  root.addChild(footerLink);
+
+  const aboutLayer = new Container();
+  aboutLayer.visible = false;
+  root.addChild(aboutLayer);
+  drawAboutModal(aboutLayer, () => {
+    aboutLayer.visible = false;
+  });
+  footerLink.on('pointertap', () => {
+    aboutLayer.visible = !aboutLayer.visible;
+  });
+
   const applyLetterbox = (): void => {
     const scale = Math.min(app.screen.width / LOGICAL_WIDTH, app.screen.height / LOGICAL_HEIGHT);
     root.scale.set(scale);
@@ -141,7 +206,7 @@ export async function createTableScene(container: HTMLElement, onSlotClick: Slot
   // which fires only after app.screen has actually been updated.
   app.renderer.on('resize', applyLetterbox);
 
-  return { app, root, cardsLayer, feedbackText, turnText, onSlotClick };
+  return { app, root, cardsLayer, overlayLayer, feedbackText, turnText, onSlotClick, onPlayAgain };
 }
 
 // Purely visual, drawn once — every slot's base grid position, whether or not it currently
@@ -188,6 +253,93 @@ function drawFlashOverlay(layer: Container, point: Point): void {
   layer.addChild(g);
 }
 
+function drawCountBadge(layer: Container, point: Point, count: number): void {
+  if (count <= 0) return;
+  const cx = point.x + CARD_WIDTH / 2;
+  const cy = point.y + CARD_HEIGHT / 2;
+  layer.addChild(new Graphics().circle(cx, cy, COUNT_BADGE_RADIUS).fill({ color: COUNT_BADGE_COLOR, alpha: COUNT_BADGE_ALPHA }));
+  const text = new Text({ text: String(count), style: { fill: 0xffffff, fontSize: 12, fontWeight: 'bold' } });
+  text.anchor.set(0.5);
+  text.position.set(cx, cy);
+  layer.addChild(text);
+}
+
+// §14 step 9/§12: built once (static content) and just toggled visible/hidden by the footer
+// link — a dim full-canvas backdrop (click to close) plus a centered panel with credits and
+// an explicit close button.
+function drawAboutModal(layer: Container, onClose: () => void): void {
+  const backdrop = new Graphics().rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT).fill({ color: OVERLAY_BG_COLOR, alpha: OVERLAY_BG_ALPHA });
+  backdrop.eventMode = 'static';
+  backdrop.on('pointertap', onClose);
+  layer.addChild(backdrop);
+
+  const panelX = (LOGICAL_WIDTH - ABOUT_PANEL_WIDTH) / 2;
+  const panelY = (LOGICAL_HEIGHT - ABOUT_PANEL_HEIGHT) / 2;
+  const panel = new Graphics().roundRect(panelX, panelY, ABOUT_PANEL_WIDTH, ABOUT_PANEL_HEIGHT, 12).fill(ABOUT_PANEL_COLOR);
+  panel.eventMode = 'static'; // swallow taps so clicking the panel itself doesn't close it via the backdrop
+  layer.addChild(panel);
+
+  const title = new Text({ text: 'About & Legal', style: { fill: 0xffffff, fontSize: 22, fontWeight: 'bold' } });
+  title.position.set(panelX + 24, panelY + 20);
+  layer.addChild(title);
+
+  const body = new Text({ text: ABOUT_BODY_TEXT, style: { fill: 0xe5e5e5, fontSize: 14, lineHeight: 20 } });
+  body.position.set(panelX + 24, panelY + 62);
+  layer.addChild(body);
+
+  const closeText = new Text({ text: '✕', style: { fill: 0xffffff, fontSize: 18, fontWeight: 'bold' } });
+  closeText.anchor.set(0.5);
+  closeText.position.set(panelX + ABOUT_PANEL_WIDTH - 22, panelY + 22);
+  closeText.eventMode = 'static';
+  closeText.cursor = 'pointer';
+  closeText.on('pointertap', onClose);
+  layer.addChild(closeText);
+}
+
+function endScreenTitle(state: GameState): string {
+  if (state.status === 'won' && state.winner) return state.winner === 'human' ? 'You won!' : 'CPU won!';
+  if (state.status === 'stalemate') {
+    if (!state.winner) return 'Stalemate';
+    return `Stalemate — ${state.winner === 'human' ? 'you win' : 'CPU wins'}`;
+  }
+  return '';
+}
+
+// §14 step 9: the win/stalemate end screen — a dedicated overlay (not just turnText, which
+// is blanked once the game ends, see turnLabel) so the result and a way to start over are
+// impossible to miss.
+function drawEndScreen(layer: Container, state: GameState, onPlayAgain: () => void): void {
+  const centerX = LOGICAL_WIDTH / 2;
+  const centerY = LOGICAL_HEIGHT / 2;
+  layer.addChild(new Graphics().rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT).fill({ color: OVERLAY_BG_COLOR, alpha: OVERLAY_BG_ALPHA }));
+
+  const title = new Text({ text: endScreenTitle(state), style: { fill: 0xffffff, fontSize: 40, fontWeight: 'bold', align: 'center' } });
+  title.anchor.set(0.5);
+  title.position.set(centerX, centerY + OVERLAY_TITLE_Y_OFFSET);
+  layer.addChild(title);
+
+  const scores = state.scores;
+  const scoreLine = scores ? `You: ${scores.human} pts   ·   CPU: ${scores.cpu} pts` : '';
+  const scoreText = new Text({ text: scoreLine, style: { fill: 0xffe28a, fontSize: 20, align: 'center' } });
+  scoreText.anchor.set(0.5);
+  scoreText.position.set(centerX, centerY + OVERLAY_SCORE_Y_OFFSET);
+  layer.addChild(scoreText);
+
+  const buttonY = centerY + OVERLAY_BUTTON_Y_OFFSET;
+  const button = new Graphics()
+    .roundRect(centerX - PLAY_AGAIN_BUTTON_WIDTH / 2, buttonY - PLAY_AGAIN_BUTTON_HEIGHT / 2, PLAY_AGAIN_BUTTON_WIDTH, PLAY_AGAIN_BUTTON_HEIGHT, 10)
+    .fill(PLAY_AGAIN_BUTTON_COLOR);
+  button.eventMode = 'static';
+  button.cursor = 'pointer';
+  button.on('pointertap', onPlayAgain);
+  layer.addChild(button);
+
+  const buttonText = new Text({ text: 'Play Again', style: { fill: 0xffffff, fontSize: 18, fontWeight: 'bold' } });
+  buttonText.anchor.set(0.5);
+  buttonText.position.set(centerX, buttonY);
+  layer.addChild(buttonText);
+}
+
 // Foundations only ever show their top card (§2/§3) — the rest is simply not the
 // visible/available one, and there's no useful "how many are underneath" signal for a
 // foundation the way there is for a stock pile.
@@ -200,6 +352,7 @@ function drawTopCardOnly(layer: Container, cards: Card[], point: Point, ref: Pil
   sprite.position.set(point.x, point.y);
   makeClickable(sprite, ref, onSlotClick);
   layer.addChild(sprite);
+  drawCountBadge(layer, point, cards.length);
 }
 
 // Roughly how many cards are "underneath" a stock-style pile, translated into a small
@@ -237,6 +390,7 @@ function drawStackedPile(layer: Container, cards: Card[], point: Point, ref: Pil
   makeClickable(sprite, ref, onSlotClick);
   layer.addChild(sprite);
   if (lifted) drawSelectionBorder(layer, point);
+  drawCountBadge(layer, point, cards.length);
 }
 
 // Houses fan sideways from `point` — outward, away from the shared foundation columns in
@@ -260,6 +414,7 @@ function drawHouse(layer: Container, cards: Card[], point: Point, ref: PileRef, 
   });
   if (topSprite) makeClickable(topSprite, ref, onSlotClick);
   if (lifted) drawSelectionBorder(layer, { x: point.x + (cards.length - 1) * sign * HOUSE_OVERLAP_X, y: point.y });
+  drawCountBadge(layer, point, cards.length);
 }
 
 function drawPlayerRow(layer: Container, state: GameState, player: PlayerId, row: PlayerRowLayout, selected: PileRef | null, onSlotClick: SlotClickHandler): void {
@@ -275,14 +430,10 @@ function drawPlayerRow(layer: Container, state: GameState, player: PlayerId, row
   });
 }
 
+// Blank once the game has ended — the dedicated end screen (drawEndScreen) covers that, so
+// this only ever needs to say whose turn it currently is.
 function turnLabel(state: GameState): string {
-  if (state.status === 'won' && state.winner) {
-    return `${state.winner === 'human' ? 'You' : 'CPU'} won! (${state.scores?.[state.winner] ?? 0} pts)`;
-  }
-  if (state.status === 'stalemate') {
-    if (!state.winner) return 'Stalemate — tie';
-    return `Stalemate — ${state.winner === 'human' ? 'you' : 'CPU'} ${state.winner === 'human' ? 'win' : 'wins'} by ${state.scores?.[state.winner] ?? 0}`;
-  }
+  if (state.status !== 'in_progress') return '';
   return state.turn === 'human' ? 'Your turn' : "CPU's turn";
 }
 
@@ -301,4 +452,9 @@ export function renderGameState(scene: TableScene, state: GameState, selected: P
   }
   scene.feedbackText.text = flash?.message ?? '';
   scene.turnText.text = turnLabel(state);
+
+  scene.overlayLayer.removeChildren();
+  if (state.status !== 'in_progress') {
+    drawEndScreen(scene.overlayLayer, state, scene.onPlayAgain);
+  }
 }

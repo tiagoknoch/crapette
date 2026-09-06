@@ -115,7 +115,26 @@ turn indicator ("Your turn" / "CPU's turn" / game-over) drawn at the top of the 
 (`turnLabel` in `scene.ts`), so a turn actually ending is visible in the game itself,
 not just in the console log.
 
-Nothing under `/src/ui` exists yet — no HUD, no persistence, no i18n wiring.
+Step 9 is also complete: HUD additions live entirely in `src/render/pixi/scene.ts` (no
+`/src/ui` needed for these). **Pile counts**: every non-empty pile (hand/waste/reserve/
+houses/foundations) gets a small numeric badge at its base slot's bottom-right corner
+(`drawCountBadge`) — an exact count, unlike `stackDepthLayers`' cosmetic depth
+*impression*. **End screen**: `overlayLayer` (new field on `TableScene`, cleared/rebuilt
+every `renderGameState` call like `cardsLayer`) draws a dimmed full-table overlay with the
+result, both players' scores, and a "Play Again" button once `state.status !==
+'in_progress'` (`drawEndScreen`); `turnText` is blanked in that state instead of also
+announcing the result, to avoid saying it twice. "Play Again" calls a new `onPlayAgain`
+callback threaded through `createTableScene`'s third argument — wired in `main.ts` to
+`initGameStore(deal())` (genuine `Math.random()`, not the fixed dev-session seed) followed
+by a direct `render()` call. **About/Legal modal**: a persistent "About / Legal" footer
+link toggles a static modal (`drawAboutModal`, built once, visibility toggled) with the
+§12-required credits (SVG-cards LGPL-2.1, PixiJS, Vite/TypeScript/Vitest) — this is pure
+presentation with no `GameState` involvement, so it lives outside the gameStore/
+`renderGameState` pipeline entirely, unlike everything else in this file. Per the
+established pattern of not yet doing i18n (that's still step 10, undone), all of this HUD
+text is hardcoded English, same as `REASON_TEXT`/`turnLabel` already were.
+
+Nothing under `/src/ui` exists yet — no persistence, no i18n wiring.
 
 The engine/AI/CLI/render/state code is still young — fields or functions with no
 usages elsewhere in the repo are safe to add, rename, or remove as the implementation

@@ -24,8 +24,21 @@ async function main(): Promise<void> {
 
   initGameStore(deal(makeSeededRng(1)));
 
-  const scene = await createTableScene(container, (ref) => handleSlotClick(ref));
-  const render = (): void => renderGameState(scene, getState(), getSelected(), getFlash());
+  let render = (): void => {};
+  // §14 step 9: "Play Again" re-deals a fresh, genuinely random game (deal()'s default RNG
+  // is Math.random — only the very first load uses the fixed seed above, for reproducible
+  // dev sessions).
+  const newGame = (): void => {
+    initGameStore(deal());
+    render();
+  };
+
+  const scene = await createTableScene(
+    container,
+    (ref) => handleSlotClick(ref),
+    () => newGame(),
+  );
+  render = (): void => renderGameState(scene, getState(), getSelected(), getFlash());
   subscribe(render);
   render();
 
