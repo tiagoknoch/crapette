@@ -66,9 +66,18 @@ plausible future option but isn't built. Every slot is clickable via Pixi's
 *actual* top card's current sprite specifically (not a fixed base rectangle — see the
 house-fan note below for why that distinction matters).
 
-CPU-side automatic play (`cpuPlayer.ts` on a timer, alternating with human input) is
-**not** wired in yet — both seats are click-driven for now, purely so step 7's
-interaction could be verified end to end. That alternation is step 8, next per §14.
+Step 8 is also complete: CPU-side automatic play is wired in via `cpuStep()` in
+`gameStore.ts`, driven by a `setInterval(cpuStep, 700)` in `main.ts`. `cpuStep` performs
+exactly one discrete action per call (one move, one draw, or resolving the just-drawn
+card) using `cpuPlayer.ts`'s existing `chooseMove`/`chooseCompulsoryMove`/
+`chooseOptionalMove` — mirroring `simulate.ts`'s `playHeuristicStep` logic but split into
+single-action beats so each CPU action is independently visible rather than an entire
+turn resolving in one frame. It's a no-op whenever it isn't actually the CPU's turn, so
+the interval can just tick unconditionally for the page's whole lifetime. `handleSlotClick`
+now also ignores clicks outright unless `state.turn === 'human'` — only the human seat is
+click-driven; the CPU seat never was reachable via a real click anyway (there's no "CPU
+plays as if clicked" concept), this just makes that explicit instead of relying on nobody
+clicking during the CPU's turn.
 
 `gameStore.ts` also logs every action to the browser console (prefixed `[crapette]`
 — selections, applied moves, rejections with their reason, draws, discards, passes,

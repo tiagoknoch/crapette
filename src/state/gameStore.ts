@@ -9,6 +9,7 @@
 // click (turn-ending discard/pass, the deferred reshuffle, win/stalemate checks). CPU-side
 // automatic play (cpuPlayer.ts on a timer) isn't wired in yet — both seats are click-driven
 // for now, purely to make step 7's interaction testable end to end.
+import { chooseCompulsoryMove, chooseMove, chooseOptionalMove } from '../ai/cpuPlayer.ts';
 import { applyMove, discardDrawnCardToWaste, drawFromHand, passTurn, startTurn } from '../engine/engine.ts';
 import { canDrawHand, evaluateMove, getAvailableSources, getLegalMoves, hasEmptyHouse } from '../engine/moveResolver.ts';
 import type { Card, GameState, Move, PileRef, PlayerId, RejectReason } from '../engine/types.ts';
@@ -220,10 +221,85 @@ function attemptMove(move: Move, mover: PlayerId): void {
   settle();
 }
 
+// §14 step 8: resolves the drawn card sitting face-up in the CPU's hand — mirrors
+// simulate.ts's playHeuristicStep, scoped to only that exact card (see its comment for why:
+// some other always-legal shuffle could otherwise get chosen instead, leaving the drawn card
+// stuck forever).
+function resolveCpuDrawnCard(): void {
+  const hand = state.players.cpu.hand;
+  const drawnId = hand[hand.length - 1].id;
+  const afterDraw = getLegalMoves(state, 'cpu');
+  const compulsoryForDrawn = afterDraw.compulsory.filter((m) => m.from.type === 'hand' && m.card.id === drawnId);
+  const optionalForDrawn = afterDraw.optional.filter((m) => m.from.type === 'hand' && m.card.id === drawnId);
+  const drawnMove =
+    compulsoryForDrawn.length > 0
+      ? chooseCompulsoryMove(compulsoryForDrawn)
+      : optionalForDrawn.length > 0
+        ? chooseOptionalMove(state, 'cpu', optionalForDrawn)
+        : null;
+
+  if (!drawnMove) {
+    performDiscard('cpu');
+    settle();
+    return;
+  }
+
+  const previousStatus = state.status;
+  log(`cpu plays ${cardLabel(drawnMove.card)}: ${pileLabel(drawnMove.from)} -> ${pileLabel(drawnMove.to)}`);
+  state = checkStalemate(checkWin(applyMove(state, drawnMove), 'cpu'));
+  logGameEndIfJustEnded(previousStatus);
+}
+
+// §8/§14 step 8: drives the CPU's side of the turn loop — one discrete action per call, so
+// main.ts can pace CPU turns visibly on a timer instead of resolving an entire turn in a
+// single frame. A no-op unless it's actually the CPU's turn, so it's cheap to call on every
+// tick regardless of whose turn it is.
+export function cpuStep(): void {
+  if (state.status !== 'in_progress' || state.turn !== 'cpu') return;
+  state = startTurn(state);
+
+  const hand = state.players.cpu.hand;
+  const drawnPending = hand.length > 0 && hand[hand.length - 1].faceUp;
+  if (drawnPending) {
+    resolveCpuDrawnCard();
+    notify();
+    return;
+  }
+
+  const legal = getLegalMoves(state, 'cpu');
+  const move = chooseMove(state, 'cpu', legal);
+  if (move) {
+    const previousStatus = state.status;
+    log(`cpu plays ${cardLabel(move.card)}: ${pileLabel(move.from)} -> ${pileLabel(move.to)}`);
+    state = checkStalemate(checkWin(applyMove(state, move), 'cpu'));
+    logGameEndIfJustEnded(previousStatus);
+    notify();
+    return;
+  }
+
+  if (canDrawHand(state, 'cpu')) {
+    state = drawFromHand(state, 'cpu');
+    const drawn = state.players.cpu.hand.at(-1);
+    log(`cpu draws ${drawn ? cardLabel(drawn) : '?'}`);
+    notify();
+    return;
+  }
+
+  const previousStatus = state.status;
+  log('cpu has no legal move and nothing to draw — turn passes');
+  state = checkStalemate(passTurn(state, 'cpu'));
+  if (state.status === 'in_progress') state = startTurn(state);
+  logGameEndIfJustEnded(previousStatus);
+  settle();
+  notify();
+}
+
 // The single entry point for every click on a pile slot (whether it currently holds a card
 // or is empty) — see comment atop this file for the overall reactive-only interaction model.
+// Only the human seat is click-driven (the CPU seat auto-plays via cpuStep on a timer, see
+// main.ts), so a click during the CPU's turn is simply ignored.
 export function handleSlotClick(ref: PileRef): void {
-  if (state.status !== 'in_progress') return;
+  if (state.status !== 'in_progress' || state.turn !== 'human') return;
   const mover = state.turn;
 
   if (selected === null) {
