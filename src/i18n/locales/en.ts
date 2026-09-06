@@ -33,6 +33,11 @@ const en = {
   rotate: {
     message: 'Please rotate your device to landscape to play.',
   },
+  resume: {
+    message: 'You have a game in progress. Resume it, or start a new game?',
+    resumeButton: 'Resume game',
+    newGameButton: 'New game',
+  },
   about: {
     title: 'About & Legal',
     body: [

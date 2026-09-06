@@ -291,7 +291,40 @@ Don't "fix" this by silently shrinking `ROW_GAP`/`ROW_MARGIN` — if it's ever r
 needs the same explicit trade-off conversation, since it directly affects the already-tuned
 desktop card size.
 
-Nothing under `/src/ui` exists yet — no `localStorage` persistence/autosave (step 11).
+Step 11 (§10/§14) is also complete: `localStorage` autosave/resume, key `crapette-save-v1`
+per §10's exact spec. `gameStore.ts`'s `notify()` — the function every state-changing action
+already calls to trigger a re-render — now also calls a new `saveGame()`, so persistence
+piggybacks on the exact same "something happened" signal as rendering does, no separate
+save-scheduling logic needed; `initGameStore()` saves too, so the very first frame of any
+game (fresh deal or a just-resumed one) is always immediately backed by a save, not just
+after the first subsequent action. `saveGame`/`loadSavedGame` wrap `localStorage` calls in
+try/catch — private-browsing quota errors or storage being disabled are real possibilities
+and must never break an in-progress move, persistence is strictly a nice-to-have layered on
+top of a game that already works without it. `loadSavedGame` also runs the parsed value
+through `isPlausibleGameState` (a handful of cheap structural checks — status/turn are one
+of their known literal values, `foundations` is a length-8 array, `players.human`/`.cpu`
+exist — not a full schema validator, just enough to catch a corrupted or foreign
+localStorage value without crashing later on some deeply-nested field being undefined) and
+returns `null` rather than a bogus object if it fails.
+
+`main.ts` reads `loadSavedGame()` before creating the table scene and picks the starting
+`GameState` per §10's exact rule ("if a save exists and the game is `in_progress`, offer
+Resume vs New Game; otherwise start fresh"), with one addition beyond spec text: "start
+fresh" only ever means the fixed dev seed on a *truly first-ever* visit (no save at all) —
+a save that exists but already ended (won/stalemate) starts fresh via a genuinely random
+`deal()` instead, matching "Play Again"'s behavior, since by that point it's a real played
+game finishing, not an empty dev session. The Resume-vs-New-Game choice itself is a new
+plain-DOM `#resume-prompt` overlay (`index.html`/`style.css`, sharing a `.modal-overlay`/
+`.modal-panel`/`.modal-buttons` look with room for future modals) rather than a Pixi screen
+— it has to resolve *before* the table scene (and the `GameState` it will render) even
+exists, so a Pixi-drawn prompt isn't an option yet at that point in startup. Its buttons
+resolve a `Promise<GameState>` (`promptResumeOrNew` in `main.ts`) that `await`s inline in
+`main()`'s startup sequence; text goes through `i18next.t()` like every other player-facing
+string (`resume.*` keys). Verified manually end-to-end: made a move, reloaded in the same
+browser storage context, got prompted, clicked Resume, and the exact prior board state
+(including the mid-turn move already made) came back unchanged.
+
+Nothing under `/src/ui` exists yet.
 
 The engine/AI/CLI/render/state code is still young — fields or functions with no
 usages elsewhere in the repo are safe to add, rename, or remove as the implementation

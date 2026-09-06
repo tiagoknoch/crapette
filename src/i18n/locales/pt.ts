@@ -35,6 +35,11 @@ const pt = {
   rotate: {
     message: 'Gire seu dispositivo para a horizontal para jogar.',
   },
+  resume: {
+    message: 'Você tem um jogo em andamento. Continuar ou começar um novo jogo?',
+    resumeButton: 'Continuar jogo',
+    newGameButton: 'Novo jogo',
+  },
   about: {
     title: 'Sobre e Aspectos Legais',
     body: [

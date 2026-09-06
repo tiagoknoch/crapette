@@ -45,3 +45,52 @@ body {
     display: flex;
   }
 }
+
+/* §14 step 11/§10: shared plain-DOM modal look, reused by #resume-prompt (visibility toggled
+   from main.ts, JS-driven — unlike #rotate-overlay's CSS-media-query gating, this depends on
+   whether a save exists, not on viewport shape). Sits above the canvas the same way. */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  font: 600 1rem/1.5 system-ui, sans-serif;
+}
+
+.modal-overlay.visible {
+  display: flex;
+}
+
+.modal-panel {
+  max-width: 26rem;
+  padding: 1.75rem 2rem;
+  border-radius: 12px;
+  background: #143a2b;
+  color: #fff;
+  text-align: center;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
+.modal-buttons button {
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  background: #2f8f5b;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modal-buttons button:hover {
+  background: #37a568;
+}

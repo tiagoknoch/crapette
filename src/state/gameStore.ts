@@ -79,6 +79,51 @@ function topCardOf(state: GameState, ref: PileRef): Card | undefined {
   return cards[cards.length - 1];
 }
 
+// §14 step 11/§10: localStorage key + shape guard. `localStorage` calls are wrapped —
+// private-browsing quota errors or storage being disabled shouldn't ever break an in-progress
+// move, persistence is a nice-to-have layered on top of a game that already works without it.
+const SAVE_KEY = 'crapette-save-v1';
+
+// A cheap structural sanity check, not a full schema validator — enough to catch a corrupted
+// or foreign localStorage value (hand-edited, or written by some future incompatible save
+// format) without crashing later on `state.players.human.reserve` etc. being undefined.
+function isPlausibleGameState(value: unknown): value is GameState {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Partial<GameState>;
+  return (
+    (v.status === 'in_progress' || v.status === 'won' || v.status === 'stalemate') &&
+    (v.turn === 'human' || v.turn === 'cpu') &&
+    Array.isArray(v.foundations) &&
+    v.foundations.length === 8 &&
+    typeof v.players === 'object' &&
+    v.players !== null &&
+    'human' in v.players &&
+    'cpu' in v.players
+  );
+}
+
+function saveGame(toSave: GameState): void {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(toSave));
+  } catch {
+    // see comment above SAVE_KEY
+  }
+}
+
+// §10: "on load, if a save exists and game is in_progress, offer Resume vs New Game;
+// otherwise start fresh" — the in_progress check is main.ts's call (it decides whether to
+// prompt), this just hands back whatever's there (of any status) or null.
+export function loadSavedGame(): GameState | null {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isPlausibleGameState(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 let state: GameState;
 let selected: PileRef | null = null;
 let flash: Flash | null = null;
@@ -89,6 +134,7 @@ export function initGameStore(initialState: GameState): void {
   state = initialState;
   selected = null;
   flash = null;
+  saveGame(state);
 }
 
 export function getState(): GameState {
@@ -108,6 +154,7 @@ export function subscribe(fn: () => void): void {
 }
 
 function notify(): void {
+  saveGame(state);
   listeners.forEach((fn) => fn());
 }
 
