@@ -222,6 +222,35 @@ feedback a rejected tap gets (verified manually: dragging a card onto an illegal
 target shows "Doesn't fit that house..." and the card visibly returns to its origin pile,
 never actually leaving it).
 
+**Move tweening (§14 step 12, partial — this is only the move half, no card-flip animation
+yet) is also in now**, per direct user direction: CPU moves (and human tap-to-select moves)
+used to teleport instantly between piles, which read as visually broken/jarring next to the
+human's own drag-and-drop, which already moves smoothly under the pointer. `scene.ts`'s
+`placeCard(scene, sprite, cardId, point)` is now the only path that ever sets a card
+sprite's position — `drawStackedPile`/`drawHouse`/`drawTopCardOnly` all route through it
+instead of calling `sprite.position.set` directly. It compares `point` against
+`scene.cardPositions`' last-known point for that exact card id (a `Map<string, Point>` field
+on `TableScene`, persisted across renders — card ids are stable/suit+rank+copy per
+`deck.ts`, not randomized, so `main.ts`'s `newGame()` explicitly `.clear()`s it, else a fresh
+deal would see "same id, different point" versus the finished game and the whole table
+would appear to slide in from its old positions): no previous entry, or an unchanged point,
+snaps instantly (`sprite.position.set`); a genuinely different previous point tweens via
+`animateCardTo` (a plain `app.ticker` callback driven by `performance.now()`, ease-out-cubic,
+`CARD_MOVE_DURATION_MS` = 260ms — no dependency on any tweening library). Every house-fan
+card (not just the top one) goes through `placeCard` too, not only the interactive top card
+— otherwise a card moving from mid-fan visibility straight to a foundation would have no
+tracked previous position to animate from.
+
+Critically, this does *not* double-animate the human's own drag: `DragController` gained a
+one-shot `consumeJustDragged(cardId)` — `endDrag` sets an internal `justDraggedCardId` right
+before calling `onDrop` for a real (moved-past-threshold, landed-on-a-different-pile) drag
+attempt, and `placeCard` checks/consumes it to force an instant snap instead of a tween for
+that specific card on the next render, regardless of what `cardPositions` says — the user's
+pointer already smoothly carried it there, so re-tweening it from its pre-drag origin would
+look like the card jumping back and re-sliding. Verified manually: a tap-to-select move
+(same code path CPU moves use) visibly animates card-in-flight partway through its 260ms
+duration; a drag-completed move does not re-animate on drop.
+
 Nothing under `/src/ui` exists yet — no `localStorage` persistence/autosave (step 11).
 
 The engine/AI/CLI/render/state code is still young — fields or functions with no

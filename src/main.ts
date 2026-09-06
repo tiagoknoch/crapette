@@ -32,6 +32,11 @@ async function main(): Promise<void> {
   // dev sessions).
   const newGame = (): void => {
     initGameStore(deal());
+    // Card ids are stable (suit+rank+copy, not randomized, see deck.ts) — without clearing
+    // this, the fresh deal's opening render would see "same id, different point" for every
+    // card versus the previous game and animate the whole table sliding in from where it
+    // last was, instead of just appearing.
+    scene.cardPositions.clear();
     render();
   };
 
