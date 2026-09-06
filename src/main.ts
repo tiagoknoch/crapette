@@ -1,6 +1,6 @@
 import './style.css';
 import { deal } from './engine/deck.ts';
-import { initI18n } from './i18n/index.ts';
+import { i18next, initI18n } from './i18n/index.ts';
 import { createTableScene, renderGameState } from './render/pixi/scene.ts';
 import { attemptDragMove, canPickUp, cpuStep, getFlash, getSelected, getState, handleSlotClick, initGameStore, subscribe } from './state/gameStore.ts';
 
@@ -24,6 +24,10 @@ async function main(): Promise<void> {
   if (!container) throw new Error('#app container missing from index.html');
 
   await initI18n();
+
+  const rotateOverlay = document.querySelector<HTMLDivElement>('#rotate-overlay');
+  if (rotateOverlay) rotateOverlay.textContent = i18next.t('rotate.message');
+
   initGameStore(deal(makeSeededRng(1)));
 
   let render = (): void => {};
@@ -36,7 +40,7 @@ async function main(): Promise<void> {
     // this, the fresh deal's opening render would see "same id, different point" for every
     // card versus the previous game and animate the whole table sliding in from where it
     // last was, instead of just appearing.
-    scene.cardPositions.clear();
+    scene.cardRenderState.clear();
     render();
   };
 

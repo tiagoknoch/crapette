@@ -13,4 +13,35 @@ body {
 
 #app canvas {
   display: block;
+  /* Without this, a touch-drag can be hijacked by the browser as a scroll/pull-to-refresh
+     gesture instead of reaching Pixi's pointer events (see scene.ts's drag controller) —
+     `none` disables all browser-native touch gestures on the canvas, which is correct here
+     since the canvas is the entire viewport and every gesture on it is game input. */
+  touch-action: none;
+}
+
+/* §5's simplest recommended v1 mobile handling: the table's 5-row layout is inherently
+   landscape-shaped (mirrors the physical two-player table), so a portrait *touch* device —
+   `pointer: coarse` deliberately excludes a desktop window that just happens to be narrow —
+   gets a "rotate your device" prompt instead of a cramped/unplayable table. Its text is set
+   from src/main.ts (via i18next) rather than hardcoded here, matching every other
+   player-facing string in this app. */
+#rotate-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem;
+  background: #0f5132;
+  color: #fff;
+  font: 600 1.25rem/1.4 system-ui, sans-serif;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate-overlay {
+    display: flex;
+  }
 }

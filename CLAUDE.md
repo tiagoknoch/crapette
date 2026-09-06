@@ -222,34 +222,74 @@ feedback a rejected tap gets (verified manually: dragging a card onto an illegal
 target shows "Doesn't fit that house..." and the card visibly returns to its origin pile,
 never actually leaving it).
 
-**Move tweening (§14 step 12, partial — this is only the move half, no card-flip animation
-yet) is also in now**, per direct user direction: CPU moves (and human tap-to-select moves)
-used to teleport instantly between piles, which read as visually broken/jarring next to the
-human's own drag-and-drop, which already moves smoothly under the pointer. `scene.ts`'s
-`placeCard(scene, sprite, cardId, point)` is now the only path that ever sets a card
-sprite's position — `drawStackedPile`/`drawHouse`/`drawTopCardOnly` all route through it
-instead of calling `sprite.position.set` directly. It compares `point` against
-`scene.cardPositions`' last-known point for that exact card id (a `Map<string, Point>` field
-on `TableScene`, persisted across renders — card ids are stable/suit+rank+copy per
-`deck.ts`, not randomized, so `main.ts`'s `newGame()` explicitly `.clear()`s it, else a fresh
-deal would see "same id, different point" versus the finished game and the whole table
-would appear to slide in from its old positions): no previous entry, or an unchanged point,
-snaps instantly (`sprite.position.set`); a genuinely different previous point tweens via
+**Move tweening (§14 step 12) is in**, per direct user direction: CPU moves (and human
+tap-to-select moves) used to teleport instantly between piles, which read as visually
+broken/jarring next to the human's own drag-and-drop, which already moves smoothly under
+the pointer. `scene.ts`'s `placeCard(scene, sprite, card, owner, point)` is now the only
+path that ever sets a card sprite's position/texture — `drawStackedPile`/`drawHouse`/
+`drawTopCardOnly` all route through it instead of calling `sprite.position.set` directly.
+It compares `point` (and `card.faceUp`) against `scene.cardRenderState`'s last-known entry
+for that exact card id (a `Map<string, { point: Point; faceUp: boolean }>` field on
+`TableScene`, persisted across renders — card ids are stable/suit+rank+copy per `deck.ts`,
+not randomized, so `main.ts`'s `newGame()` explicitly `.clear()`s it, else a fresh deal
+would see "same id, different point/face" versus the finished game and the whole table
+would appear to slide/flip in from its old state): no previous entry, or an unchanged point
+and face, snaps instantly; a genuinely different previous point (same face) tweens via
 `animateCardTo` (a plain `app.ticker` callback driven by `performance.now()`, ease-out-cubic,
-`CARD_MOVE_DURATION_MS` = 260ms — no dependency on any tweening library). Every house-fan
-card (not just the top one) goes through `placeCard` too, not only the interactive top card
-— otherwise a card moving from mid-fan visibility straight to a foundation would have no
+`CARD_MOVE_DURATION_MS` = 260ms — no dependency on any tweening library); an unchanged point
+but a *different* previous face (§14 step 12's card-flip half — most commonly a hand card
+just turned face-up by a draw) flips via `flipCard` instead (below). Every house-fan card
+(not just the top one) goes through `placeCard` too, not only the interactive top card —
+otherwise a card moving from mid-fan visibility straight to a foundation would have no
 tracked previous position to animate from.
 
 Critically, this does *not* double-animate the human's own drag: `DragController` gained a
 one-shot `consumeJustDragged(cardId)` — `endDrag` sets an internal `justDraggedCardId` right
 before calling `onDrop` for a real (moved-past-threshold, landed-on-a-different-pile) drag
 attempt, and `placeCard` checks/consumes it to force an instant snap instead of a tween for
-that specific card on the next render, regardless of what `cardPositions` says — the user's
-pointer already smoothly carried it there, so re-tweening it from its pre-drag origin would
-look like the card jumping back and re-sliding. Verified manually: a tap-to-select move
-(same code path CPU moves use) visibly animates card-in-flight partway through its 260ms
-duration; a drag-completed move does not re-animate on drop.
+that specific card on the next render, regardless of what `cardRenderState` says — the
+user's pointer already smoothly carried it there, so re-tweening it from its pre-drag origin
+would look like the card jumping back and re-sliding. Verified manually: a tap-to-select
+move (same code path CPU moves use) visibly animates card-in-flight partway through its
+260ms duration; a drag-completed move does not re-animate on drop.
+
+**Card-flip animation (§14 step 12, the other tweening half) is also in**: `flipCard(app,
+sprite, newTexture)` in `scene.ts` does a horizontal squash-to-a-sliver/re-expand
+(`CARD_FLIP_DURATION_MS` = 220ms), swapping the sprite's actual `.texture` at the midpoint
+rather than crossfading (there's no cheap crossfade primitive worth reaching for here) —
+`cardSprites.ts` exports a new `cardTexture(card, owner)` (the `Texture` lookup
+`createCardSprite` already did internally, factored out) so `placeCard` can resolve both the
+pre-flip texture (`{ ...card, faceUp: previous.faceUp }`) and the real post-flip one without
+duplicating the suit/rank/back-color key logic. Renormalizes `sprite.width`/`height` right
+after the texture swap rather than assuming both faces share a native pixel size, so this
+stays correct even if a face/back SVG's dimensions ever drift apart. Verified manually:
+drawing a hand card visibly shrinks to a sliver mid-flip before the new face appears and
+grows back out, with no distortion or flash of the wrong size.
+
+**Two other §14 step 12 mobile items are in**: `#app canvas` now sets `touch-action: none`
+in `style.css` — without it a touch-drag risks being hijacked by the browser as a
+scroll/pull-to-refresh gesture before it ever reaches Pixi's pointer events (see
+`createDragController`). And a portrait "rotate your device" overlay (§5's simplest
+recommended v1 approach) now exists as a plain `#rotate-overlay` div in `index.html`,
+shown via a pure-CSS `@media (orientation: portrait) and (pointer: coarse)` rule in
+`style.css` — `pointer: coarse` deliberately restricts this to touch devices, so a desktop
+user resizing their window narrow never sees it (verified with a touch-emulated Playwright
+context: shows in portrait, hides in landscape; a non-touch context never shows it
+regardless of viewport shape). Its text is set from `main.ts` via `i18next.t('rotate.message')`
+after `initI18n()` resolves, matching every other player-facing string rather than being
+hardcoded in the HTML.
+
+**Known limitation, deliberately left as-is per direct user direction**: on common phone
+landscape sizes (e.g. 667×375, 844×390) the letterboxed scale comes out around 0.34–0.36,
+making each card's touch target roughly 33×47 CSS px — below §5's 44×44px minimum on the
+width axis specifically (height clears it). The bottleneck is `LOGICAL_HEIGHT` (1104px,
+6 stacked rows) being tall relative to a phone's landscape aspect ratio, not `CARD_WIDTH`
+itself — fixing it properly would mean shrinking vertical spacing/margins across the whole
+table, affecting the desktop layout too (already deliberately tuned/approved — see
+`CARD_WIDTH` 80→96 above). Tablet and up (iPad mini and larger: ~67×97px) are unaffected.
+Don't "fix" this by silently shrinking `ROW_GAP`/`ROW_MARGIN` — if it's ever revisited, it
+needs the same explicit trade-off conversation, since it directly affects the already-tuned
+desktop card size.
 
 Nothing under `/src/ui` exists yet — no `localStorage` persistence/autosave (step 11).
 

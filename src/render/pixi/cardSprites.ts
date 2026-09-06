@@ -9,7 +9,7 @@
 // texture at SVG_RASTER_RESOLUTION× its natural size (169×245), comfortably above any size a
 // card is actually drawn at, so it stays crisp regardless of how big CARD_WIDTH/CARD_HEIGHT
 // (layout.ts) end up being — unlike a fixed-resolution PNG, which blurs past its native size.
-import { Assets, Sprite } from 'pixi.js';
+import { Assets, Sprite, type Texture } from 'pixi.js';
 import type { Card, PlayerId, Rank, Suit } from '../../engine/types.ts';
 import { CARD_HEIGHT, CARD_WIDTH } from '../layout.ts';
 
@@ -69,10 +69,16 @@ export async function preloadCardTextures(): Promise<void> {
 }
 
 // `owner` picks the back color for a face-down card; irrelevant for a face-up one, so
-// callers that only ever draw face-up cards (foundations, houses) can omit it.
+// callers that only ever draw face-up cards (foundations, houses) can omit it. Exported
+// separately from createCardSprite so scene.ts's flip animation (swapping a sprite's
+// texture mid-flip between the pre- and post-flip face) can look up either side's texture
+// without duplicating the suit/rank/back-color key lookup.
+export function cardTexture(card: Card, owner: PlayerId = 'human'): Texture {
+  return Assets.get(card.faceUp ? faceKey(card.suit, card.rank) : backKey(owner));
+}
+
 export function createCardSprite(card: Card, owner: PlayerId = 'human'): Sprite {
-  const key = card.faceUp ? faceKey(card.suit, card.rank) : backKey(owner);
-  const sprite = new Sprite(Assets.get(key));
+  const sprite = new Sprite(cardTexture(card, owner));
   sprite.width = CARD_WIDTH;
   sprite.height = CARD_HEIGHT;
   sprite.anchor.set(0.5);

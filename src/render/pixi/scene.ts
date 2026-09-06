@@ -5,7 +5,7 @@
 // onSlotClick. What that click *means* (select / attempt a move / draw / discard) is
 // entirely gameStore.ts's call — deliberately reactive-only, no legal-destination
 // highlighting or preemptive disabling (see gameStore.ts's file comment for why).
-import { Application, Container, type FederatedPointerEvent, Graphics, type Sprite, Text } from 'pixi.js';
+import { Application, Container, type FederatedPointerEvent, Graphics, type Sprite, Text, type Texture } from 'pixi.js';
 import { i18next } from '../../i18n/index.ts';
 import type { Card, GameState, PileRef, PlayerId } from '../../engine/types.ts';
 import {
@@ -20,7 +20,7 @@ import {
   type PlayerRowLayout,
   type Point,
 } from '../layout.ts';
-import { createCardSprite, preloadCardTextures } from './cardSprites.ts';
+import { cardTexture, createCardSprite, preloadCardTextures } from './cardSprites.ts';
 
 const TABLE_BG_COLOR = 0x0f5132; // felt green
 const SLOT_OUTLINE_COLOR = 0xffffff;
@@ -40,11 +40,14 @@ const FLASH_FILL_ALPHA = 0.45;
 const FEEDBACK_TEXT_Y = 26;
 const TURN_TEXT_Y = 54;
 
-// §14 step 12 (partial — move tweening only, no card-flip animation yet): how long a card
-// takes to slide from its previous rendered position to its new one. Exists specifically so
-// CPU moves (and human tap-to-select moves) read as a card actually traveling from pile to
-// pile, matching the visual continuity a human's own drag-and-drop already has for free.
+// §14 step 12: how long a card takes to slide from its previous rendered position to its new
+// one. Exists specifically so CPU moves (and human tap-to-select moves) read as a card
+// actually traveling from pile to pile, matching the visual continuity a human's own
+// drag-and-drop already has for free.
 const CARD_MOVE_DURATION_MS = 260;
+// How long a face-down/face-up flip takes (e.g. drawing a hand card face-up in place) — half
+// shrinking to a sliver, half growing back out, texture swapped at the midpoint.
+const CARD_FLIP_DURATION_MS = 220;
 
 // §14 step 9: a small badge showing exactly how many cards are in a pile — pile counts are
 // a HUD feature distinct from stackDepthLayers' *impression* of depth (that's cosmetic only,
@@ -111,12 +114,13 @@ export interface TableScene {
   onSlotClick: SlotClickHandler;
   onPlayAgain: () => void;
   dragController: DragController;
-  // Last rendered position per card id, so placeCard can tell "this card just appeared here"
-  // (no entry, or same point — snap instantly) apart from "this card just moved here from
-  // somewhere else" (tween). Cleared on a fresh deal (see main.ts) — card ids are stable
-  // (suit+rank+copy, not randomized, see deck.ts) so a stale entry from a finished game would
-  // otherwise make the next game's opening deal appear to slide in from the old positions.
-  cardPositions: Map<string, Point>;
+  // Last rendered position + face-up state per card id, so placeCard can tell "this card just
+  // appeared here" (no entry — snap instantly) apart from "this card just moved here from
+  // somewhere else" (tween) or "this card just turned face up/down in place" (flip). Cleared
+  // on a fresh deal (see main.ts) — card ids are stable (suit+rank+copy, not randomized, see
+  // deck.ts) so a stale entry from a finished game would otherwise make the next game's
+  // opening deal appear to slide/flip in from the old game's state.
+  cardRenderState: Map<string, { point: Point; faceUp: boolean }>;
 }
 
 interface Slot {
@@ -282,22 +286,65 @@ function animateCardTo(app: Application, sprite: Sprite, from: Point, to: Point)
   app.ticker.add(tick);
 }
 
+// `sprite`'s CURRENT texture is `oldTexture` (the pre-flip face) going in — placeCard swaps
+// it there just before calling this — and this animates a horizontal squash-to-a-sliver,
+// swaps to `newTexture` (the actual post-flip face) at the midpoint, then grows back out.
+// Renormalizes width/height after the swap rather than assuming both textures share a native
+// size, so this stays correct even if a face/back SVG's natural dimensions ever drift apart.
+function flipCard(app: Application, sprite: Sprite, newTexture: Texture): void {
+  const start = performance.now();
+  const half = CARD_FLIP_DURATION_MS / 2;
+  let baseScaleX = sprite.scale.x;
+  let swapped = false;
+  const tick = (): void => {
+    const elapsed = performance.now() - start;
+    if (!swapped && elapsed >= half) {
+      sprite.texture = newTexture;
+      sprite.width = CARD_WIDTH;
+      sprite.height = CARD_HEIGHT;
+      baseScaleX = sprite.scale.x;
+      swapped = true;
+    }
+    const factor = swapped ? Math.min(1, (elapsed - half) / half) : Math.max(0, 1 - elapsed / half);
+    sprite.scale.x = baseScaleX * factor;
+    if (elapsed >= CARD_FLIP_DURATION_MS) {
+      sprite.scale.x = baseScaleX;
+      app.ticker.remove(tick);
+    }
+  };
+  app.ticker.add(tick);
+}
+
 // Every card sprite's position goes through here instead of a raw `sprite.position.set` —
-// §14 step 12 (partial): if this exact card (by id) rendered somewhere else last render,
-// slide it from there to `point` instead of popping directly there. Skips the tween (snaps
-// straight to `point`) for a card seen for the first time (nothing to animate from), a card
-// whose position didn't actually change, or a card the human's own drag gesture just carried
-// here (see DragController.consumeJustDragged — that motion already happened, live, under
-// the pointer).
-function placeCard(scene: TableScene, sprite: Sprite, cardId: string, point: Point): void {
-  const previous = scene.cardPositions.get(cardId);
-  const justDragged = scene.dragController.consumeJustDragged(cardId);
-  scene.cardPositions.set(cardId, point);
-  if (justDragged || !previous || (previous.x === point.x && previous.y === point.y)) {
+// §14 step 12: if this exact card (by id) rendered somewhere else last render, slide it from
+// there to `point` instead of popping directly there (animateCardTo); if it rendered at the
+// *same* point but with the other face showing (a hand card just turned up, most commonly),
+// flip it in place (flipCard) instead. Skips all animation (snaps straight to `point`,
+// current face) for a card seen for the first time (nothing to animate from), a card whose
+// position and face both stayed the same, or a card the human's own drag gesture just
+// carried here (see DragController.consumeJustDragged — that motion already happened, live,
+// under the pointer).
+function placeCard(scene: TableScene, sprite: Sprite, card: Card, owner: PlayerId, point: Point): void {
+  const previous = scene.cardRenderState.get(card.id);
+  const justDragged = scene.dragController.consumeJustDragged(card.id);
+  scene.cardRenderState.set(card.id, { point, faceUp: card.faceUp });
+
+  const samePoint = previous !== undefined && previous.point.x === point.x && previous.point.y === point.y;
+
+  if (!justDragged && previous && samePoint && previous.faceUp !== card.faceUp) {
+    sprite.position.set(point.x, point.y);
+    sprite.texture = cardTexture({ ...card, faceUp: previous.faceUp }, owner);
+    sprite.width = CARD_WIDTH;
+    sprite.height = CARD_HEIGHT;
+    flipCard(scene.app, sprite, cardTexture(card, owner));
+    return;
+  }
+
+  if (justDragged || !previous || samePoint) {
     sprite.position.set(point.x, point.y);
     return;
   }
-  animateCardTo(scene.app, sprite, previous, point);
+  animateCardTo(scene.app, sprite, previous.point, point);
 }
 
 export async function createTableScene(container: HTMLElement, handlers: TableSceneHandlers): Promise<TableScene> {
@@ -393,7 +440,7 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
   // which fires only after app.screen has actually been updated.
   app.renderer.on('resize', applyLetterbox);
 
-  return { app, root, cardsLayer, overlayLayer, feedbackText, turnText, onSlotClick, onPlayAgain, dragController, cardPositions: new Map() };
+  return { app, root, cardsLayer, overlayLayer, feedbackText, turnText, onSlotClick, onPlayAgain, dragController, cardRenderState: new Map() };
 }
 
 // Purely visual, drawn once — every slot's base grid position, whether or not it currently
@@ -538,7 +585,7 @@ function drawTopCardOnly(scene: TableScene, layer: Container, cards: Card[], poi
   }
   const card = cards[cards.length - 1];
   const sprite = createCardSprite(card);
-  placeCard(scene, sprite, card.id, point);
+  placeCard(scene, sprite, card, 'human', point);
   makeClickable(sprite, ref, scene.onSlotClick);
   layer.addChild(sprite);
   drawCountBadge(layer, point, cards.length);
@@ -577,7 +624,7 @@ function drawStackedPile(scene: TableScene, layer: Container, cards: Card[], poi
   const card = cards[cards.length - 1];
   const sprite = createCardSprite(card, owner);
   const spritePoint = { x: point.x, y: point.y - (lifted ? SELECTED_LIFT_Y : 0) };
-  placeCard(scene, sprite, card.id, spritePoint);
+  placeCard(scene, sprite, card, owner, spritePoint);
   makeClickable(sprite, ref, scene.onSlotClick);
   scene.dragController.attach(sprite, ref, spritePoint, card.id);
   layer.addChild(sprite);
@@ -603,7 +650,7 @@ function drawHouse(scene: TableScene, layer: Container, cards: Card[], point: Po
     const sprite = createCardSprite(card);
     const isTop = i === cards.length - 1;
     const cardPoint = { x: point.x + i * sign * HOUSE_OVERLAP_X, y: point.y - (isTop && lifted ? SELECTED_LIFT_Y : 0) };
-    placeCard(scene, sprite, card.id, cardPoint);
+    placeCard(scene, sprite, card, 'human', cardPoint);
     layer.addChild(sprite);
     if (isTop) {
       topSprite = sprite;

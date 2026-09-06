@@ -30,6 +30,9 @@ const en = {
   footer: {
     aboutLegal: 'About / Legal',
   },
+  rotate: {
+    message: 'Please rotate your device to landscape to play.',
+  },
   about: {
     title: 'About & Legal',
     body: [

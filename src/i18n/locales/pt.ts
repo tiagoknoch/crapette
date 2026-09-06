@@ -32,6 +32,9 @@ const pt = {
   footer: {
     aboutLegal: 'Sobre / Legal',
   },
+  rotate: {
+    message: 'Gire seu dispositivo para a horizontal para jogar.',
+  },
   about: {
     title: 'Sobre e Aspectos Legais',
     body: [
