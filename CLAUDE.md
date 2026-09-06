@@ -361,22 +361,37 @@ layer — instead `layer.removeChildren()` and rebuild its content fresh every t
 `drawTextModal`/`drawConfirmModal` now take their text as plain string params instead of
 returning `Text` refs for later patching — rebuilding on every open already picks up
 whatever `i18next.t()` returns at that moment, so there's nothing left to patch after a
-language switch. A second, related wrinkle surfaced on top of that: even after rebuilding
-fresh, a `Graphics` shape's *auto-computed* hit area was still unreliable in this exact
-rebuild-on-open situation, while the equivalent `Text` object (e.g. `drawTextModal`'s '✕'
-close icon) and giving the `Graphics` shape an *explicit* `.hitArea` (a `Rectangle` matching
-its drawn bounds — see `cancelBg`/`confirmBg` in `drawConfirmModal`, and the "Play Again"
-button in `drawEndScreen`, which got the same treatment defensively) were both reliable.
-Don't add a new Graphics-based button anywhere in this file without an explicit `hitArea`.
+language switch.
 
-Honesty check on this one, rather than overclaiming: the explicit-`hitArea` fix was
-confirmed working in multiple clean, isolated repros, but a handful of rapid-fire
-open → cancel → reopen → confirm sequences in automated testing still occasionally missed a
-click even after the fix, in a way that didn't reproduce deterministically enough to pin
-down further (possibly automated-testing-specific timing, possibly a residual real issue —
-genuinely unclear). If you find the New Game confirm dialog (or any modal) ever not
-responding to a click in actual use, that's the area to suspect first — please report back
-what you were doing right before it happened.
+**Correction to an earlier, wrong diagnosis in this same area** — a prior pass here believed
+an explicit `.hitArea` on the button's `Graphics` background was what made it reliably
+clickable, and shipped that as the fix. It wasn't: a user later reported the New Game confirm
+button simply not working at all (not intermittently — every time), which led to actually
+instrumenting `scene.app.renderer.events.rootBoundary.hitTest(x, y)` directly (via Playwright)
+rather than guessing again. That showed the real picture: in pixi.js 8.19.0, a `Graphics`
+object sitting among these particular modal-layer siblings reliably **fails** hit-testing —
+confirmed false for both an explicit `.hitArea` Rectangle *and* Pixi's own auto-computed
+bounds from the drawn shape, and even for a brand-new `Graphics` added fresh at runtime purely
+to test the theory. A `Text` object in the exact same layer, same position, hit-tests
+correctly every time — auto text bounds or an explicit Rectangle `.hitArea`, both verified
+directly against real (non-forced) geometry, not just plausible-looking property values. Root
+cause inside Pixi's `EventBoundary` was not pinned down further (not worth it once a reliable
+alternative was confirmed) — what's confirmed is the workaround: **all interactivity
+(`eventMode`, `cursor`, `.hitArea`, the `pointertap` listener) now lives on the button's
+`Text` label, not its `Graphics` background** — see `makeButtonHitTarget` in `scene.ts`, used
+by `drawConfirmModal`'s Cancel/Confirm buttons and `drawEndScreen`'s "Play Again" button. The
+`Graphics` shapes are now purely decorative (no `eventMode`, no listener). Don't add a new
+Graphics-based *button* anywhere in this file — if it needs a click handler, put the
+handler (and an explicit `.hitArea` sized to the visual button, in the Text's own
+anchor-relative local space) on its Text label instead, per `makeButtonHitTarget`. This does
+NOT apply to plain non-button hit zones like card sprites/`drawEmptyHitZone`'s invisible
+rects/the modal backdrop and panel Graphics (`makeClickable`, `drawTextModal`'s backdrop) —
+those were independently verified still hit-test correctly; the failure is specific to these
+small button-sized `Graphics` siblings, not `Graphics` hit-testing in general.
+
+Verified via a 5-cycle rapid open→cancel→reopen→cancel stress test (previously the exact
+scenario that intermittently failed) plus a real open→confirm — all six landed correctly, and
+`npm run test` (90 tests) and `tsc --noEmit` were both clean after the change.
 
 Nothing under `/src/ui` exists yet.
 
@@ -384,6 +399,42 @@ The engine/AI/CLI/render/state code is still young — fields or functions with 
 usages elsewhere in the repo are safe to add, rename, or remove as the implementation
 is worked out; this isn't yet a stable public API with external callers to preserve
 compatibility for.
+
+### Fixed a real bug: stalemate was declared *far* too early (2 turns, not a real deadlock)
+
+`checkStalemate` in `winCheck.ts` originally matched tech-spec §9's own text literally: declare
+`status = 'stalemate'` once `roundsWithoutProgress` (a shared counter, incremented once per
+turn that made zero progress, reset on any progress) hit a hardcoded `2` — i.e. one bad draw
+per player, back to back. A user reported this firing while they still had a legal move sitting
+on the board; their actual saved game (`localStorage`'s `crapette-save-v1`) showed
+`human.hand.length === 18` (all still face-down, never drawn this cycle) and
+`human.waste.length === 2` at the moment it triggered — nowhere close to genuinely stuck.
+
+Checked against three independent sources (pagat.com/patience/crapette.html, Wikipedia's
+Russian Bank article, denexa.com's Crapette writeup) — all three agree the real rule is
+"nobody has any legally-playable cards in their stock, discard, or reserve," a board-state
+condition, not a fixed turn count. Fix (§9/resolution #4, see the comment above
+`checkStalemate`): keep the same increment/reset mechanism, but replace the threshold `2`
+with `2 * max(humanCycleSize, cpuCycleSize)`, where a player's cycle size is their current
+`hand.length + waste.length` — i.e. require each player to have had enough consecutive
+no-progress turns to have cycled through *all* their own remaining hand+waste at least once
+without a play (turns strictly alternate, so N consecutive no-progress turns split ~N/2 per
+player, hence the `2×`). Verified directly against the user's reported save: with the fix,
+that exact state resolves to `in_progress` (needed threshold was 72, not 2), and
+`getLegalMoves` confirms the human genuinely did have a move available. `docs/tech-spec.md`
+§9 has been corrected to match; `winCheck.test.ts` covers the old-threshold-must-NOT-fire
+regression case using the reported shape, plus the dynamic-threshold math generally.
+
+**Debug tooling added alongside the stalemate fix**: every genuinely new deal (first-ever
+visit's fixed seed, "start fresh" after a finished save, Resume-prompt's "New game", the
+in-game New Game confirm, and "Play Again") now goes through `dealWithLoggedSeed()` in
+`main.ts` — logs `[crapette] seed: <n>` to the console and persists it to `localStorage` under
+`crapette-seed-v1`, so a future bug report can just be a seed number instead of the whole
+`crapette-save-v1` JSON blob (which is only recoverable while that exact browser tab/session is
+still open, and gets silently discarded the moment a finished game's save is superseded by a
+fresh deal). Deliberately kept OUT of `GameState`/`/src/engine` entirely — `deal()` only ever
+takes a `random: () => number`, stays seed-agnostic, per the engine purity rule; the seed is
+pure tooling living in `main.ts` as a side channel next to the save, never read by game logic.
 
 ### Known non-bug: rare simulate.ts "failure" on seed 3925 (and similar)
 

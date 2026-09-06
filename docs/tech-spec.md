@@ -65,7 +65,7 @@ Practically: after every move, recompute the legal-move set. If category 1 or 2 
 
 **Win condition:** a player with empty hand + empty waste + empty reserve wins immediately.
 **Scoring:** winner gets 30 + 1 per opponent's remaining hand+waste card + 2 per opponent's remaining reserve card.
-**Stalemate:** if neither player can make any reserve/hand-driven progress over a full round (see §9), score by count difference (2 pts/reserve card, 1 pt/hand+waste card), no 30-pt bonus.
+**Stalemate:** if neither player has any legally-playable card in their stock, discard, or reserve — confirmed by each player completing a full no-progress cycle through their own remaining hand+waste, not just one bad draw (see §9) — score by count difference (2 pts/reserve card, 1 pt/hand+waste card), no 30-pt bonus.
 
 ---
 
@@ -274,7 +274,7 @@ function startTurn(state):
 ## 9. Win / Stalemate Detection
 
 - **Win**: after every `applyMove`, check if the mover's reserve, hand, and waste are all empty. If so, `status = 'won'`, compute score, stop.
-- **Stalemate**: track `roundsWithoutProgress`. "Progress" for a player's turn = any move was made that wasn't purely "draw then immediately discard to waste with zero other moves that turn." If both players, in consecutive turns, make zero progress (every hand card drawn goes straight to waste, no reserve/house/foundation/load move was possible at any point), increment a counter; if it hits 2 consecutive no-progress turns (one per player), declare `status = 'stalemate'` and score by the difference-in-remaining-cards rule. Reset the counter to 0 on any progress.
+- **Stalemate**: track `roundsWithoutProgress`. "Progress" for a player's turn = any move was made that wasn't purely "draw then immediately discard to waste with zero other moves that turn." Every no-progress turn increments the counter; any progress by either player resets it to 0. The real rule (per pagat.com/patience/crapette.html, Wikipedia's Russian Bank article, and denexa.com's Crapette writeup) is "nobody has any legally-playable cards in their stock, discard, or reserve" — a board-state condition, not a fixed turn count. Since turns strictly alternate, N consecutive no-progress turns split ~N/2 per player; declare `status = 'stalemate'` once `roundsWithoutProgress >= 2 * max(humanCycleSize, cpuCycleSize)`, where a player's cycle size is their current `hand.length + waste.length` — i.e. once each player has had enough consecutive empty turns to have cycled through *all* their own remaining hand+waste without a play, proving further draws just repeat cards already seen to fail. (A hardcoded threshold of `2`, as this section originally specified, is wrong — confirmed via a real played game where a single bad draw per player ended the game with 20+ untried cards still sitting in hand/waste.) Score by the difference-in-remaining-cards rule once triggered.
 
 ---
 

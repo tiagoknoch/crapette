@@ -643,6 +643,24 @@ function drawTextModal(layer: Container, width: number, height: number, title: s
   layer.addChild(closeText);
 }
 
+// A button rendered as a non-interactive Graphics background plus a Text label that carries
+// ALL the interactivity itself (eventMode/cursor/hitArea/pointertap) — deliberately NOT the
+// more obvious "put the listener on the Graphics rect" approach. Found via direct EventBoundary
+// introspection (Playwright + scene.app.renderer.events.rootBoundary.hitTest, not guesswork):
+// in pixi.js 8.19.0, a Graphics object sitting among these particular modal-layer siblings
+// reliably FAILS hit-testing — confirmed false for both an explicit `.hitArea` Rectangle *and*
+// Pixi's own auto-computed bounds from the drawn shape, and even for a brand-new Graphics added
+// fresh at runtime — while a Text object in the exact same layer, same position, hit-tests
+// correctly every time (auto text bounds or an explicit Rectangle hitArea, both verified). This
+// is what silently broke the New Game confirm dialog's buttons despite the earlier explicit-
+// hitArea fix (see historical comment this replaces) — that fix targeted the wrong object type.
+function makeButtonHitTarget(text: Text, width: number, height: number, onTap: () => void): void {
+  text.eventMode = 'static';
+  text.cursor = 'pointer';
+  text.hitArea = new Rectangle(-width / 2, -height / 2, width, height);
+  text.on('pointertap', onTap);
+}
+
 // §14: the "New Game" footer entry's confirmation dialog — discarding an in-progress game is
 // exactly the kind of hard-to-reverse action worth an explicit "are you sure?" rather than
 // acting on the first click. Rebuilt fresh on every open, same reasoning as drawTextModal.
@@ -671,29 +689,19 @@ function drawConfirmModal(layer: Container, message: string, confirmLabel: strin
   const gap = 16;
 
   const cancelX = centerX - gap / 2 - CONFIRM_BUTTON_WIDTH;
-  const cancelBg = new Graphics().roundRect(cancelX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, 10).fill(0x3a3a3a);
-  // An explicit `hitArea` (rather than relying on Pixi computing one from the drawn geometry)
-  // is what makes this reliably hit-testable — see the file-level note above drawTextModal.
-  cancelBg.hitArea = new Rectangle(cancelX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT);
-  cancelBg.eventMode = 'static';
-  cancelBg.cursor = 'pointer';
-  cancelBg.on('pointertap', onCancel);
-  layer.addChild(cancelBg);
+  layer.addChild(new Graphics().roundRect(cancelX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, 10).fill(0x3a3a3a));
   const cancelButtonText = new Text({ text: cancelLabel, style: { fill: 0xffffff, fontSize: 15, fontWeight: 'bold' } });
   cancelButtonText.anchor.set(0.5);
   cancelButtonText.position.set(centerX - gap / 2 - CONFIRM_BUTTON_WIDTH / 2, buttonY);
+  makeButtonHitTarget(cancelButtonText, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, onCancel);
   layer.addChild(cancelButtonText);
 
   const confirmX = centerX + gap / 2;
-  const confirmBg = new Graphics().roundRect(confirmX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, 10).fill(PLAY_AGAIN_BUTTON_COLOR);
-  confirmBg.hitArea = new Rectangle(confirmX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT);
-  confirmBg.eventMode = 'static';
-  confirmBg.cursor = 'pointer';
-  confirmBg.on('pointertap', onConfirm);
-  layer.addChild(confirmBg);
+  layer.addChild(new Graphics().roundRect(confirmX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, 10).fill(PLAY_AGAIN_BUTTON_COLOR));
   const confirmButtonText = new Text({ text: confirmLabel, style: { fill: 0xffffff, fontSize: 15, fontWeight: 'bold' } });
   confirmButtonText.anchor.set(0.5);
   confirmButtonText.position.set(centerX + gap / 2 + CONFIRM_BUTTON_WIDTH / 2, buttonY);
+  makeButtonHitTarget(confirmButtonText, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, onConfirm);
   layer.addChild(confirmButtonText);
 }
 
@@ -729,18 +737,12 @@ function drawEndScreen(layer: Container, state: GameState, onPlayAgain: () => vo
 
   const buttonY = centerY + OVERLAY_BUTTON_Y_OFFSET;
   const buttonX = centerX - PLAY_AGAIN_BUTTON_WIDTH / 2;
-  const button = new Graphics().roundRect(buttonX, buttonY - PLAY_AGAIN_BUTTON_HEIGHT / 2, PLAY_AGAIN_BUTTON_WIDTH, PLAY_AGAIN_BUTTON_HEIGHT, 10).fill(PLAY_AGAIN_BUTTON_COLOR);
-  // See drawConfirmModal's comment — an explicit hitArea is what makes a Graphics button
-  // reliably hit-testable here, not just its auto-computed bounds.
-  button.hitArea = new Rectangle(buttonX, buttonY - PLAY_AGAIN_BUTTON_HEIGHT / 2, PLAY_AGAIN_BUTTON_WIDTH, PLAY_AGAIN_BUTTON_HEIGHT);
-  button.eventMode = 'static';
-  button.cursor = 'pointer';
-  button.on('pointertap', onPlayAgain);
-  layer.addChild(button);
+  layer.addChild(new Graphics().roundRect(buttonX, buttonY - PLAY_AGAIN_BUTTON_HEIGHT / 2, PLAY_AGAIN_BUTTON_WIDTH, PLAY_AGAIN_BUTTON_HEIGHT, 10).fill(PLAY_AGAIN_BUTTON_COLOR));
 
   const buttonText = new Text({ text: i18next.t('end.playAgain'), style: { fill: 0xffffff, fontSize: 18, fontWeight: 'bold' } });
   buttonText.anchor.set(0.5);
   buttonText.position.set(centerX, buttonY);
+  makeButtonHitTarget(buttonText, PLAY_AGAIN_BUTTON_WIDTH, PLAY_AGAIN_BUTTON_HEIGHT, onPlayAgain);
   layer.addChild(buttonText);
 }
 

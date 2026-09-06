@@ -31,6 +31,29 @@ function makeSeededRng(seed: number): () => number {
   };
 }
 
+// Debug-only: every genuinely new deal gets a real (non-secret, purely diagnostic) numeric
+// seed instead of raw Math.random(), logged to the console and stashed in localStorage — so
+// a bug report can just say "seed 481212" instead of pasting the whole crapette-save-v1 blob.
+// Deliberately NOT part of GameState itself (which stays in /src/engine, seed-agnostic — it
+// only ever takes a `random: () => number` — see deck.ts's deal()); this is pure tooling, so
+// it lives here in main.ts as a side channel next to the save, never read by game logic.
+const SEED_STORAGE_KEY = 'crapette-seed-v1';
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * 0x7fffffff) + 1;
+}
+
+function dealWithLoggedSeed(seed: number): GameState {
+  console.log(`[crapette] seed: ${seed}`);
+  try {
+    localStorage.setItem(SEED_STORAGE_KEY, String(seed));
+  } catch {
+    // localStorage can throw (private browsing, quota, disabled) — seed logging is a
+    // nice-to-have, never worth breaking a fresh deal over.
+  }
+  return deal(makeSeededRng(seed));
+}
+
 // §14 step 11/§10: "if a save exists and the game is in_progress, offer Resume vs New Game."
 // Plain DOM overlay (like #rotate-overlay) rather than a Pixi screen, since it needs to
 // resolve *before* the table scene (and its fixed-seed-or-saved starting GameState) exists.
@@ -52,7 +75,7 @@ function promptResumeOrNew(saved: GameState): Promise<GameState> {
       resolve(chosen);
     };
     resumeButton.onclick = () => finish(saved);
-    newGameButton.onclick = () => finish(deal());
+    newGameButton.onclick = () => finish(dealWithLoggedSeed(randomSeed()));
     overlay.classList.add('visible');
   });
 }
@@ -72,15 +95,18 @@ async function main(): Promise<void> {
   // matches "Play Again"'s behavior, no prompt needed ("otherwise start fresh", §10). A save
   // exists and is still in_progress: ask.
   const initialState =
-    saved === null ? deal(makeSeededRng(1)) : saved.status !== 'in_progress' ? deal() : await promptResumeOrNew(saved);
+    saved === null
+      ? dealWithLoggedSeed(1)
+      : saved.status !== 'in_progress'
+        ? dealWithLoggedSeed(randomSeed())
+        : await promptResumeOrNew(saved);
   initGameStore(initialState);
 
   let render = (): void => {};
-  // §14 step 9: "Play Again" re-deals a fresh, genuinely random game (deal()'s default RNG
-  // is Math.random — only the very first load uses the fixed seed above, for reproducible
-  // dev sessions).
+  // §14 step 9: "Play Again" re-deals a fresh, genuinely random game — only the very first
+  // load uses the fixed seed 1 above, for reproducible dev sessions.
   const newGame = (): void => {
-    initGameStore(deal());
+    initGameStore(dealWithLoggedSeed(randomSeed()));
     // Card ids are stable (suit+rank+copy, not randomized, see deck.ts) — without clearing
     // this, the fresh deal's opening render would see "same id, different point" for every
     // card versus the previous game and animate the whole table sliding in from where it

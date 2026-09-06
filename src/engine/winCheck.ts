@@ -32,12 +32,41 @@ function penalty(state: GameState, player: PlayerId): number {
   return 2 * p.reserve.length + (p.hand.length + p.waste.length);
 }
 
-// §9 stalemate: two consecutive no-progress turns (one per player) ends the game.
-// §2/resolution #3 scoring: lower own-penalty (2/reserve card, 1/hand+waste card) wins the
-// difference; the other player scores 0; a tie has no winner and both score 0. No 30pt bonus.
+// §9 stalemate, resolution #4 (corrected from the tech-spec's original "2 consecutive
+// no-progress turns"): per the actual rules (pagat.com/patience/crapette.html, Wikipedia's
+// Russian Bank article, denexa.com's Crapette writeup — all three independently agree),
+// stalemate means "nobody has any legally-playable cards in their stock, discard, or
+// reserve," a genuine board-state condition, not a turn-count heuristic. A single bad draw
+// per player proves nothing when their hand+waste still holds another 20+ untried cards —
+// confirmed as a real, reachable bug via an actual played game reported by the user, saved
+// mid-hand with human.hand.length===18 (all still face-down, never drawn this cycle) and
+// human.waste.length===2, yet `roundsWithoutProgress` had already hit the old hardcoded `2`
+// and ended the game.
+//
+// `roundsWithoutProgress` still increments/resets exactly as before (see engine.ts) — a
+// player's turn only ever adds to the streak when that specific turn had zero legal moves
+// (a pure draw-then-discard, or a real pass). What changes here is the THRESHOLD: instead of
+// a fixed `2`, require enough consecutive no-progress turns for BOTH players to have each
+// cycled through their *entire* remaining hand+waste at least once without a play — i.e. a
+// full lap proving "drawing further just repeats the same cards you've already seen fail."
+// Turns strictly alternate (every turn ends via discardDrawnCardToWaste or passTurn, both of
+// which always flip `state.turn`), so N consecutive no-progress turns split as roughly N/2
+// per player; guaranteeing each player got at least their own full-cycle count needs
+// N >= 2 * max(humanCycle, cpuCycle). (A player whose hand+waste is already empty has
+// cycle size 0 — correctly still stuck, so 0 rounds is enough for them specifically, though
+// the max() with the other player's nonzero cycle almost always dominates in practice.)
+// §2/resolution #3 scoring (unchanged): lower own-penalty (2/reserve card, 1/hand+waste
+// card) wins the difference; the other player scores 0; a tie has no winner and both score
+// 0. No 30pt bonus.
 export function checkStalemate(state: GameState): GameState {
   if (state.status !== 'in_progress') return state;
-  if (state.roundsWithoutProgress < 2) return state;
+
+  const cycleSize = (player: PlayerId): number => {
+    const p = state.players[player];
+    return p.hand.length + p.waste.length;
+  };
+  const threshold = 2 * Math.max(cycleSize('human'), cycleSize('cpu'));
+  if (state.roundsWithoutProgress < threshold) return state;
 
   const humanPenalty = penalty(state, 'human');
   const cpuPenalty = penalty(state, 'cpu');
