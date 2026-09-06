@@ -5,8 +5,8 @@
 // onSlotClick. What that click *means* (select / attempt a move / draw / discard) is
 // entirely gameStore.ts's call — deliberately reactive-only, no legal-destination
 // highlighting or preemptive disabling (see gameStore.ts's file comment for why).
-import { Application, Container, type FederatedPointerEvent, Graphics, type Sprite, Text, type Texture } from 'pixi.js';
-import { i18next } from '../../i18n/index.ts';
+import { Application, Container, type FederatedPointerEvent, Graphics, Rectangle, type Sprite, Text, type Texture } from 'pixi.js';
+import { i18next, SUPPORTED_LANGUAGES, setLanguage, type SupportedLanguage } from '../../i18n/index.ts';
 import type { Card, GameState, PileRef, PlayerId } from '../../engine/types.ts';
 import {
   CARD_HEIGHT,
@@ -67,12 +67,26 @@ const PLAY_AGAIN_BUTTON_WIDTH = 170;
 const PLAY_AGAIN_BUTTON_HEIGHT = 46;
 const PLAY_AGAIN_BUTTON_COLOR = 0x2f8f5b;
 
-// §14 step 9: footer link + the About/Legal modal it opens (LGPL-2.1 attribution for the
-// vendored card art per §12 — see public/cards/CREDIT.md).
+// §14 step 9: footer row + the About/Legal modal it opens (LGPL-2.1 attribution for the
+// vendored card art per §12 — see public/cards/CREDIT.md). Extended later (still §14) with
+// three more footer entries — New Game, How to Play, and a language toggle — all sharing the
+// same dim-backdrop-plus-panel modal look as the About/Legal one.
 const FOOTER_LINK_Y_OFFSET = -20;
+const MODAL_PANEL_COLOR = 0x143a2b;
 const ABOUT_PANEL_WIDTH = 560;
 const ABOUT_PANEL_HEIGHT = 300;
-const ABOUT_PANEL_COLOR = 0x143a2b;
+const RULES_PANEL_WIDTH = 680;
+const RULES_PANEL_HEIGHT = 800;
+const CONFIRM_PANEL_WIDTH = 440;
+const CONFIRM_PANEL_HEIGHT = 170;
+const CONFIRM_BUTTON_WIDTH = 170;
+const CONFIRM_BUTTON_HEIGHT = 42;
+
+// Proper names, not translated content — a language's own name for itself ("Português") is
+// conventionally written the same way regardless of the UI's current language, unlike every
+// other string in this file. The footer toggle always shows the *other* language's name (the
+// one you'd switch to), not the current one.
+const LANGUAGE_AUTONYM: Record<SupportedLanguage, string> = { en: 'English', pt: 'Português' };
 
 export interface FeedbackFlash {
   ref: PileRef;
@@ -93,6 +107,15 @@ export interface TableSceneHandlers {
   // attemptDragMove, which this is wired to in main.ts.
   canPickUp: CanPickUp;
   onDrop: DropHandler;
+  // Footer "New Game" → confirm dialog → this — deals a fresh game the same way "Play Again"
+  // does (main.ts wires both to the same function), just reachable mid-game, not only once
+  // one has ended.
+  onNewGameRequest: () => void;
+  // Fires after the footer language toggle has already switched i18next's active language
+  // and refreshed every static (built-once) Text on screen — main.ts just needs to re-render
+  // with the current GameState so turn/flash/end-screen text (already dynamic, rebuilt every
+  // renderGameState call) picks up the new language too.
+  onLanguageChange: () => void;
 }
 
 interface DragController {
@@ -347,8 +370,12 @@ function placeCard(scene: TableScene, sprite: Sprite, card: Card, owner: PlayerI
   animateCardTo(scene.app, sprite, previous.point, point);
 }
 
+function otherLanguage(): SupportedLanguage {
+  return SUPPORTED_LANGUAGES.find((lang) => lang !== i18next.language) ?? 'en';
+}
+
 export async function createTableScene(container: HTMLElement, handlers: TableSceneHandlers): Promise<TableScene> {
-  const { onSlotClick, onPlayAgain, canPickUp, onDrop } = handlers;
+  const { onSlotClick, onPlayAgain, canPickUp, onDrop, onNewGameRequest, onLanguageChange } = handlers;
   const app = new Application();
   // `resolution` defaults to 1 (CSS px per physical px) — on any high-DPI/retina screen that
   // renders the whole canvas at a lower density than the display, then lets the browser
@@ -400,28 +427,104 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
   turnText.position.set(LOGICAL_WIDTH / 2, TURN_TEXT_Y);
   root.addChild(turnText);
 
-  // §14 step 9: a persistent footer link that toggles a static About/Legal modal — this is
-  // pure presentation with no game-state involvement, so it lives entirely outside the
-  // gameStore/renderGameState pipeline; it just adds its own layer on top of everything else
-  // and toggles that layer's visibility directly.
-  const footerLink = new Text({
-    text: i18next.t('footer.aboutLegal'),
-    style: { fill: 0xbbbbbb, fontSize: 14 },
-  });
-  footerLink.anchor.set(0.5);
-  footerLink.position.set(LOGICAL_WIDTH / 2, LOGICAL_HEIGHT + FOOTER_LINK_Y_OFFSET);
-  footerLink.eventMode = 'static';
-  footerLink.cursor = 'pointer';
-  root.addChild(footerLink);
+  // §14: footer row — New Game | How to Play | language toggle | About/Legal. Pure
+  // presentation, no game-state involvement, so it all lives outside the gameStore/
+  // renderGameState pipeline; each entry either toggles its own static modal layer's
+  // visibility directly, or (language) switches i18next's active language in place.
+  function makeFooterButton(text: string): Text {
+    const t = new Text({ text, style: { fill: 0xbbbbbb, fontSize: 14 } });
+    t.anchor.set(0.5);
+    t.eventMode = 'static';
+    t.cursor = 'pointer';
+    return t;
+  }
 
+  const footerY = LOGICAL_HEIGHT + FOOTER_LINK_Y_OFFSET;
+  const newGameFooterButton = makeFooterButton(i18next.t('footer.newGame'));
+  newGameFooterButton.position.set(LOGICAL_WIDTH * (1 / 5), footerY);
+  root.addChild(newGameFooterButton);
+
+  const rulesFooterButton = makeFooterButton(i18next.t('footer.howToPlay'));
+  rulesFooterButton.position.set(LOGICAL_WIDTH * (2 / 5), footerY);
+  root.addChild(rulesFooterButton);
+
+  const languageFooterButton = makeFooterButton(LANGUAGE_AUTONYM[otherLanguage()]);
+  languageFooterButton.position.set(LOGICAL_WIDTH * (3 / 5), footerY);
+  root.addChild(languageFooterButton);
+
+  const aboutFooterButton = makeFooterButton(i18next.t('footer.aboutLegal'));
+  aboutFooterButton.position.set(LOGICAL_WIDTH * (4 / 5), footerY);
+  root.addChild(aboutFooterButton);
+
+  // Each modal layer starts empty and hidden; its content is built fresh every time it opens
+  // rather than once up front and merely toggled visible — see drawTextModal's comment for
+  // why (a real PixiJS hit-testing gotcha, not stylistic preference).
   const aboutLayer = new Container();
   aboutLayer.visible = false;
   root.addChild(aboutLayer);
-  drawAboutModal(aboutLayer, () => {
-    aboutLayer.visible = false;
+  aboutFooterButton.on('pointertap', () => {
+    if (aboutLayer.visible) {
+      aboutLayer.visible = false;
+      return;
+    }
+    aboutLayer.visible = true;
+    aboutLayer.removeChildren();
+    drawTextModal(aboutLayer, ABOUT_PANEL_WIDTH, ABOUT_PANEL_HEIGHT, i18next.t('about.title'), i18next.t('about.body'), () => {
+      aboutLayer.visible = false;
+    });
   });
-  footerLink.on('pointertap', () => {
-    aboutLayer.visible = !aboutLayer.visible;
+
+  const rulesLayer = new Container();
+  rulesLayer.visible = false;
+  root.addChild(rulesLayer);
+  rulesFooterButton.on('pointertap', () => {
+    if (rulesLayer.visible) {
+      rulesLayer.visible = false;
+      return;
+    }
+    rulesLayer.visible = true;
+    rulesLayer.removeChildren();
+    drawTextModal(rulesLayer, RULES_PANEL_WIDTH, RULES_PANEL_HEIGHT, i18next.t('rules.title'), i18next.t('rules.body'), () => {
+      rulesLayer.visible = false;
+    });
+  });
+
+  const confirmLayer = new Container();
+  confirmLayer.visible = false;
+  root.addChild(confirmLayer);
+  newGameFooterButton.on('pointertap', () => {
+    confirmLayer.visible = true;
+    confirmLayer.removeChildren();
+    drawConfirmModal(
+      confirmLayer,
+      i18next.t('newGameConfirm.message'),
+      i18next.t('newGameConfirm.confirm'),
+      i18next.t('newGameConfirm.cancel'),
+      () => {
+        confirmLayer.visible = false;
+        onNewGameRequest();
+      },
+      () => {
+        confirmLayer.visible = false;
+      },
+    );
+  });
+
+  // Only the persistent footer labels need refreshing on a language switch — the three
+  // modals above always rebuild with the current language on their next open anyway.
+  function refreshStaticText(): void {
+    newGameFooterButton.text = i18next.t('footer.newGame');
+    rulesFooterButton.text = i18next.t('footer.howToPlay');
+    languageFooterButton.text = LANGUAGE_AUTONYM[otherLanguage()];
+    aboutFooterButton.text = i18next.t('footer.aboutLegal');
+  }
+  refreshStaticText();
+
+  languageFooterButton.on('pointertap', () => {
+    setLanguage(otherLanguage()).then(() => {
+      refreshStaticText();
+      onLanguageChange();
+    });
   });
 
   const applyLetterbox = (): void => {
@@ -498,36 +601,100 @@ function drawCountBadge(layer: Container, point: Point, count: number): void {
   layer.addChild(text);
 }
 
-// §14 step 9/§12: built once (static content) and just toggled visible/hidden by the footer
-// link — a dim full-canvas backdrop (click to close) plus a centered panel with credits and
-// an explicit close button.
-function drawAboutModal(layer: Container, onClose: () => void): void {
+// Shared by the About/Legal and How to Play modals — (re)built fresh into `layer` every time
+// it's opened (see openModal in createTableScene): a dim full-canvas backdrop (click to
+// close) plus a centered panel with a title, a body of text, and an explicit close button.
+//
+// Deliberately NOT built once and left toggling `.visible` — a PixiJS gotcha found the hard
+// way: an `eventMode: 'static'` Graphics/Text object created while its container is
+// `visible: false` never becomes properly hit-testable, even after the container is later
+// set back to `visible: true` (confirmed via a minimal repro: the exact same shape/listener
+// setup worked immediately when created *after* setting the container visible, and never
+// worked when pre-built invisible and toggled later — huge thanks to spending an entire
+// debugging pass on this exact class of bug, isolating it down to that one variable). Content
+// is passed in directly (not returned as refs to patch later) since rebuilding on every open
+// already picks up the current language automatically — no separate refresh path needed.
+function drawTextModal(layer: Container, width: number, height: number, title: string, body: string, onClose: () => void): void {
   const backdrop = new Graphics().rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT).fill({ color: OVERLAY_BG_COLOR, alpha: OVERLAY_BG_ALPHA });
   backdrop.eventMode = 'static';
   backdrop.on('pointertap', onClose);
   layer.addChild(backdrop);
 
-  const panelX = (LOGICAL_WIDTH - ABOUT_PANEL_WIDTH) / 2;
-  const panelY = (LOGICAL_HEIGHT - ABOUT_PANEL_HEIGHT) / 2;
-  const panel = new Graphics().roundRect(panelX, panelY, ABOUT_PANEL_WIDTH, ABOUT_PANEL_HEIGHT, 12).fill(ABOUT_PANEL_COLOR);
+  const panelX = (LOGICAL_WIDTH - width) / 2;
+  const panelY = (LOGICAL_HEIGHT - height) / 2;
+  const panel = new Graphics().roundRect(panelX, panelY, width, height, 12).fill(MODAL_PANEL_COLOR);
   panel.eventMode = 'static'; // swallow taps so clicking the panel itself doesn't close it via the backdrop
   layer.addChild(panel);
 
-  const title = new Text({ text: i18next.t('about.title'), style: { fill: 0xffffff, fontSize: 22, fontWeight: 'bold' } });
-  title.position.set(panelX + 24, panelY + 20);
-  layer.addChild(title);
+  const titleText = new Text({ text: title, style: { fill: 0xffffff, fontSize: 22, fontWeight: 'bold' } });
+  titleText.position.set(panelX + 24, panelY + 20);
+  layer.addChild(titleText);
 
-  const body = new Text({ text: i18next.t('about.body'), style: { fill: 0xe5e5e5, fontSize: 14, lineHeight: 20 } });
-  body.position.set(panelX + 24, panelY + 62);
-  layer.addChild(body);
+  const bodyText = new Text({ text: body, style: { fill: 0xe5e5e5, fontSize: 14, lineHeight: 20, wordWrap: true, wordWrapWidth: width - 48 } });
+  bodyText.position.set(panelX + 24, panelY + 62);
+  layer.addChild(bodyText);
 
   const closeText = new Text({ text: '✕', style: { fill: 0xffffff, fontSize: 18, fontWeight: 'bold' } });
   closeText.anchor.set(0.5);
-  closeText.position.set(panelX + ABOUT_PANEL_WIDTH - 22, panelY + 22);
+  closeText.position.set(panelX + width - 22, panelY + 22);
   closeText.eventMode = 'static';
   closeText.cursor = 'pointer';
   closeText.on('pointertap', onClose);
   layer.addChild(closeText);
+}
+
+// §14: the "New Game" footer entry's confirmation dialog — discarding an in-progress game is
+// exactly the kind of hard-to-reverse action worth an explicit "are you sure?" rather than
+// acting on the first click. Rebuilt fresh on every open, same reasoning as drawTextModal.
+function drawConfirmModal(layer: Container, message: string, confirmLabel: string, cancelLabel: string, onConfirm: () => void, onCancel: () => void): void {
+  const backdrop = new Graphics().rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT).fill({ color: OVERLAY_BG_COLOR, alpha: OVERLAY_BG_ALPHA });
+  backdrop.eventMode = 'static';
+  backdrop.on('pointertap', onCancel);
+  layer.addChild(backdrop);
+
+  const panelX = (LOGICAL_WIDTH - CONFIRM_PANEL_WIDTH) / 2;
+  const panelY = (LOGICAL_HEIGHT - CONFIRM_PANEL_HEIGHT) / 2;
+  const panel = new Graphics().roundRect(panelX, panelY, CONFIRM_PANEL_WIDTH, CONFIRM_PANEL_HEIGHT, 12).fill(MODAL_PANEL_COLOR);
+  panel.eventMode = 'static';
+  layer.addChild(panel);
+
+  const centerX = panelX + CONFIRM_PANEL_WIDTH / 2;
+  const messageText = new Text({
+    text: message,
+    style: { fill: 0xffffff, fontSize: 16, align: 'center', wordWrap: true, wordWrapWidth: CONFIRM_PANEL_WIDTH - 48 },
+  });
+  messageText.anchor.set(0.5, 0);
+  messageText.position.set(centerX, panelY + 24);
+  layer.addChild(messageText);
+
+  const buttonY = panelY + CONFIRM_PANEL_HEIGHT - 24 - CONFIRM_BUTTON_HEIGHT / 2;
+  const gap = 16;
+
+  const cancelX = centerX - gap / 2 - CONFIRM_BUTTON_WIDTH;
+  const cancelBg = new Graphics().roundRect(cancelX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, 10).fill(0x3a3a3a);
+  // An explicit `hitArea` (rather than relying on Pixi computing one from the drawn geometry)
+  // is what makes this reliably hit-testable — see the file-level note above drawTextModal.
+  cancelBg.hitArea = new Rectangle(cancelX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT);
+  cancelBg.eventMode = 'static';
+  cancelBg.cursor = 'pointer';
+  cancelBg.on('pointertap', onCancel);
+  layer.addChild(cancelBg);
+  const cancelButtonText = new Text({ text: cancelLabel, style: { fill: 0xffffff, fontSize: 15, fontWeight: 'bold' } });
+  cancelButtonText.anchor.set(0.5);
+  cancelButtonText.position.set(centerX - gap / 2 - CONFIRM_BUTTON_WIDTH / 2, buttonY);
+  layer.addChild(cancelButtonText);
+
+  const confirmX = centerX + gap / 2;
+  const confirmBg = new Graphics().roundRect(confirmX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, 10).fill(PLAY_AGAIN_BUTTON_COLOR);
+  confirmBg.hitArea = new Rectangle(confirmX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT);
+  confirmBg.eventMode = 'static';
+  confirmBg.cursor = 'pointer';
+  confirmBg.on('pointertap', onConfirm);
+  layer.addChild(confirmBg);
+  const confirmButtonText = new Text({ text: confirmLabel, style: { fill: 0xffffff, fontSize: 15, fontWeight: 'bold' } });
+  confirmButtonText.anchor.set(0.5);
+  confirmButtonText.position.set(centerX + gap / 2 + CONFIRM_BUTTON_WIDTH / 2, buttonY);
+  layer.addChild(confirmButtonText);
 }
 
 function endScreenTitle(state: GameState): string {
@@ -561,9 +728,11 @@ function drawEndScreen(layer: Container, state: GameState, onPlayAgain: () => vo
   layer.addChild(scoreText);
 
   const buttonY = centerY + OVERLAY_BUTTON_Y_OFFSET;
-  const button = new Graphics()
-    .roundRect(centerX - PLAY_AGAIN_BUTTON_WIDTH / 2, buttonY - PLAY_AGAIN_BUTTON_HEIGHT / 2, PLAY_AGAIN_BUTTON_WIDTH, PLAY_AGAIN_BUTTON_HEIGHT, 10)
-    .fill(PLAY_AGAIN_BUTTON_COLOR);
+  const buttonX = centerX - PLAY_AGAIN_BUTTON_WIDTH / 2;
+  const button = new Graphics().roundRect(buttonX, buttonY - PLAY_AGAIN_BUTTON_HEIGHT / 2, PLAY_AGAIN_BUTTON_WIDTH, PLAY_AGAIN_BUTTON_HEIGHT, 10).fill(PLAY_AGAIN_BUTTON_COLOR);
+  // See drawConfirmModal's comment — an explicit hitArea is what makes a Graphics button
+  // reliably hit-testable here, not just its auto-computed bounds.
+  button.hitArea = new Rectangle(buttonX, buttonY - PLAY_AGAIN_BUTTON_HEIGHT / 2, PLAY_AGAIN_BUTTON_WIDTH, PLAY_AGAIN_BUTTON_HEIGHT);
   button.eventMode = 'static';
   button.cursor = 'pointer';
   button.on('pointertap', onPlayAgain);

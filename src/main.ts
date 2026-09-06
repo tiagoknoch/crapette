@@ -94,6 +94,8 @@ async function main(): Promise<void> {
     onPlayAgain: () => newGame(),
     canPickUp: (ref) => canPickUp(ref),
     onDrop: (from, to) => attemptDragMove(from, to),
+    onNewGameRequest: () => newGame(),
+    onLanguageChange: () => render(),
   });
   render = (): void => renderGameState(scene, getState(), getSelected(), getFlash());
   subscribe(render);

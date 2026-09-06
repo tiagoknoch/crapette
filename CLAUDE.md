@@ -324,6 +324,58 @@ string (`resume.*` keys). Verified manually end-to-end: made a move, reloaded in
 browser storage context, got prompted, clicked Resume, and the exact prior board state
 (including the mid-turn move already made) came back unchanged.
 
+**Three more UI gaps closed, per direct user direction ("what is missing? We need new game
+UI and so on")**: an in-game way to abandon and restart mid-game (previously "Play Again"
+only existed on the end screen), a manual language switcher (i18n infra existed since step
+10 but was auto-detect-only), and an in-game rules reference (the About modal only ever had
+license credits, not how-to-play text).
+
+The footer is now a 4-item row — New Game | How to Play | *(language autonym)* | About /
+Legal — evenly spaced via `LOGICAL_WIDTH * (1/5 .. 4/5)`. New Game opens a confirm dialog
+(`drawConfirmModal`) rather than acting immediately, since discarding an in-progress game is
+exactly the kind of hard-to-reverse action worth an "are you sure?"; confirming calls the
+same `onNewGameRequest` → `newGame()` path `main.ts` already had wired to "Play Again". How
+to Play opens a new, much taller text modal (`rules.title`/`rules.body` keys, en+pt) built
+from `drawTextModal` — the same function the About modal now also goes through (refactored
+to take `title`/`body` strings directly rather than returning refs to patch in later — see
+below for why). The language toggle shows the *other* language's autonym (`LANGUAGE_AUTONYM`
+— "Português"/"English", hardcoded, deliberately NOT run through i18next, since a language's
+own name for itself isn't translated content) and calls a new `setLanguage()` in
+`src/i18n/index.ts`, which persists the choice to `localStorage` (key `crapette-lang`,
+checked by `detectLanguage()` ahead of browser auto-detection) and calls
+`i18next.changeLanguage()`; `scene.ts`'s `refreshStaticText()` then updates the four
+persistent footer labels (the three modals below don't need patching — see below).
+
+**A genuine, non-obvious PixiJS gotcha was found and fixed while building the New Game
+confirm dialog, worth understanding before touching any modal/overlay code in this file**:
+an `eventMode: 'static'` Graphics or Text object created while its container is still
+`visible: false` never becomes properly hit-testable later, even after the container is set
+back to `visible: true` — confirmed via a minimal isolated repro (identical shape/listener
+setup; the only variable was whether the object existed yet at the moment its container
+became visible). The fix, applied to all three modals (About, How to Play, New Game
+confirm): **don't** pre-build a modal once and merely toggle `.visible` on a persistent
+layer — instead `layer.removeChildren()` and rebuild its content fresh every time it opens
+(see each footer button's `pointertap` handler in `createTableScene`). This is also *why*
+`drawTextModal`/`drawConfirmModal` now take their text as plain string params instead of
+returning `Text` refs for later patching — rebuilding on every open already picks up
+whatever `i18next.t()` returns at that moment, so there's nothing left to patch after a
+language switch. A second, related wrinkle surfaced on top of that: even after rebuilding
+fresh, a `Graphics` shape's *auto-computed* hit area was still unreliable in this exact
+rebuild-on-open situation, while the equivalent `Text` object (e.g. `drawTextModal`'s '✕'
+close icon) and giving the `Graphics` shape an *explicit* `.hitArea` (a `Rectangle` matching
+its drawn bounds — see `cancelBg`/`confirmBg` in `drawConfirmModal`, and the "Play Again"
+button in `drawEndScreen`, which got the same treatment defensively) were both reliable.
+Don't add a new Graphics-based button anywhere in this file without an explicit `hitArea`.
+
+Honesty check on this one, rather than overclaiming: the explicit-`hitArea` fix was
+confirmed working in multiple clean, isolated repros, but a handful of rapid-fire
+open → cancel → reopen → confirm sequences in automated testing still occasionally missed a
+click even after the fix, in a way that didn't reproduce deterministically enough to pin
+down further (possibly automated-testing-specific timing, possibly a residual real issue —
+genuinely unclear). If you find the New Game confirm dialog (or any modal) ever not
+responding to a click in actual use, that's the area to suspect first — please report back
+what you were doing right before it happened.
+
 Nothing under `/src/ui` exists yet.
 
 The engine/AI/CLI/render/state code is still young — fields or functions with no
