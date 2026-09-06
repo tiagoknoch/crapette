@@ -40,7 +40,7 @@ const pt = {
     cancel: 'Cancelar',
   },
   rotate: {
-    message: 'Gire seu dispositivo para a horizontal para jogar.',
+    message: 'Gire seu dispositivo para a vertical para jogar.',
   },
   resume: {
     message: 'Você tem um jogo em andamento. Continuar ou começar um novo jogo?',

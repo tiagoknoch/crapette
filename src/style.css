@@ -20,12 +20,18 @@ body {
   touch-action: none;
 }
 
-/* §5's simplest recommended v1 mobile handling: the table's 5-row layout is inherently
-   landscape-shaped (mirrors the physical two-player table), so a portrait *touch* device —
-   `pointer: coarse` deliberately excludes a desktop window that just happens to be narrow —
-   gets a "rotate your device" prompt instead of a cramped/unplayable table. Its text is set
-   from src/main.ts (via i18next) rather than hardcoded here, matching every other
-   player-facing string in this app. */
+/* §5's simplest recommended v1 mobile handling, adjusted for the tableau geometry actually
+   built (see layout.ts's file comment — LOGICAL_WIDTH×LOGICAL_HEIGHT is 924×1104, taller
+   than wide, not the landscape band §5's text describes): the letterboxed scale on a phone
+   works out *bigger* in portrait than landscape (portrait: width-constrained, ~0.41 scale;
+   landscape: height-constrained, ~0.34 scale, with far more wasted pillarbox space) — so a
+   landscape *touch* device — `pointer: coarse` deliberately excludes a desktop window that
+   just happens to be wide — gets a "rotate your device" prompt instead of a needlessly
+   cramped table. Its text is set from src/main.ts (via i18next) rather than hardcoded here,
+   matching every other player-facing string in this app.
+   Direct user direction, deciding between two real options once the numbers were shown:
+   this canvas's own proportions favor portrait, so the prompt now asks for portrait rather
+   than trying to reshape the tableau to match the original landscape assumption instead. */
 #rotate-overlay {
   display: none;
   position: fixed;
@@ -40,7 +46,7 @@ body {
   font: 600 1.25rem/1.4 system-ui, sans-serif;
 }
 
-@media (orientation: portrait) and (pointer: coarse) {
+@media (orientation: landscape) and (pointer: coarse) {
   #rotate-overlay {
     display: flex;
   }

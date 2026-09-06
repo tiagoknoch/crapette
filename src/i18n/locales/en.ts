@@ -38,7 +38,7 @@ const en = {
     cancel: 'Cancel',
   },
   rotate: {
-    message: 'Please rotate your device to landscape to play.',
+    message: 'Please rotate your device to portrait to play.',
   },
   resume: {
     message: 'You have a game in progress. Resume it, or start a new game?',

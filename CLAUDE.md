@@ -279,17 +279,19 @@ regardless of viewport shape). Its text is set from `main.ts` via `i18next.t('ro
 after `initI18n()` resolves, matching every other player-facing string rather than being
 hardcoded in the HTML.
 
-**Known limitation, deliberately left as-is per direct user direction**: on common phone
-landscape sizes (e.g. 667×375, 844×390) the letterboxed scale comes out around 0.34–0.36,
-making each card's touch target roughly 33×47 CSS px — below §5's 44×44px minimum on the
-width axis specifically (height clears it). The bottleneck is `LOGICAL_HEIGHT` (1104px,
-6 stacked rows) being tall relative to a phone's landscape aspect ratio, not `CARD_WIDTH`
-itself — fixing it properly would mean shrinking vertical spacing/margins across the whole
-table, affecting the desktop layout too (already deliberately tuned/approved — see
-`CARD_WIDTH` 80→96 above). Tablet and up (iPad mini and larger: ~67×97px) are unaffected.
-Don't "fix" this by silently shrinking `ROW_GAP`/`ROW_MARGIN` — if it's ever revisited, it
-needs the same explicit trade-off conversation, since it directly affects the already-tuned
-desktop card size.
+**Known limitation, deliberately left as-is per direct user direction**: the letterboxed
+scale on common phone *portrait* sizes (e.g. 375×667, 390×844 — portrait is now the
+expected/prompted orientation, see the rotate-overlay note above) comes out around
+0.41–0.43, making each card's touch target roughly 39×57 CSS px — still below §5's 44×44px
+minimum on the width axis specifically (height clears it), though notably less cramped than
+landscape's ~33×47px would be on the same devices. The bottleneck is `LOGICAL_HEIGHT`
+(1104px, 6 stacked rows) being tall relative to `LOGICAL_WIDTH`, not `CARD_WIDTH` itself —
+fixing it properly would mean shrinking vertical spacing/margins across the whole table,
+affecting the desktop layout too (already deliberately tuned/approved — see `CARD_WIDTH`
+80→96 above). Tablet and up (iPad mini and larger, either orientation: comfortably >60px)
+are unaffected. Don't "fix" this by silently shrinking `ROW_GAP`/`ROW_MARGIN` — if it's ever
+revisited, it needs the same explicit trade-off conversation, since it directly affects the
+already-tuned desktop card size.
 
 Step 11 (§10/§14) is also complete: `localStorage` autosave/resume, key `crapette-save-v1`
 per §10's exact spec. `gameStore.ts`'s `notify()` — the function every state-changing action
