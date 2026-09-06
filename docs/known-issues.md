@@ -121,6 +121,75 @@ loaded through the real Resume flow: clicking the empty hand pile logged
 0→3), and rendered correctly (waste pile empty, hand showing the newly drawn card
 face-up). `npm run test` (92 tests) and `tsc --noEmit` were both clean after the change.
 
+## Fixed: cards sometimes visibly flew in from an unrelated position (often the waste pile)
+
+**Symptom**: a user reported that "the flip animation comes from the center, or a dragging
+card comes from the center" — cards would occasionally slide in from an unrelated spot on
+the table (often near a waste pile, which sits at each row's horizontal center) instead of
+just appearing or animating from where they actually just came from.
+
+**Root cause**: only the *top* card of a stacked pile (hand/waste/reserve/foundation — see
+`drawStackedPile`/`drawTopCardOnly`) gets a `placeCard` call each render; a card buried
+underneath simply isn't touched again until it resurfaces as that pile's top, which can be
+many renders (and many unrelated moves) later. `scene.cardRenderState` is a flat
+`Map<cardId, {point, faceUp}>` with no way to tell "this was placed last render" apart from
+"this was placed 40 renders ago and has been invisible ever since" — so when a
+long-buried card resurfaced, `placeCard` trusted its stale, ancient position as a genuine
+"animate from here" source, producing a spurious flight from wherever it happened to be
+last visible (very often a waste pile, since most cards pass through one).
+
+**Verified directly** (not just inferred from reading the code): poked a fake stale
+`cardRenderState` entry for a card about to become a pile's new top, forced a render, and
+sampled the actual sprite's position over several animation frames — it visibly
+interpolated from the poked stale point toward its real destination, confirming the bug
+empirically before fixing it.
+
+**Fix**: added a `renderGeneration` counter on `TableScene`, incremented once at the start
+of every `renderGameState` call. Each `cardRenderState` entry now also stores the
+generation it was set during, and `placeCard` only trusts a stored entry as a real
+animation source if `stored.generation === scene.renderGeneration - 1` — i.e. it was
+placed on the *immediately preceding* render, so it's known to have been continuously,
+visibly at that position until right now. Anything older is treated the same as "never
+seen before" (snap instantly, no animation) rather than an animation source.
+
+**Re-verified after the fix**: the same poke-and-sample test now shows the sprite snapping
+straight to its correct final position with no interpolation, while a genuine
+back-to-back move (real previous-render position, one render apart) still tweens smoothly
+as before — confirming the fix doesn't regress legitimate animations. `npm run test`
+(92 tests) and `tsc --noEmit` both clean.
+
+## Feature: completed foundations (built up through King) now flip face-down
+
+Per direct user question, confirmed against pagat.com/patience/crapette.html's rules text:
+"No further card can be added after the King; it is usual to turn the King face-down to
+indicate that the foundation pile is complete." This is a display convention, not a
+legality rule — a full foundation already naturally accepts no further cards
+(`canPlayToFoundation` only ever allows the next rank up), so this has zero effect on
+game logic. `drawTopCardOnly` in `scene.ts` (foundations-only, per its own comment) now
+renders a foundation's top card face-down once `cards.length === FOUNDATION_COMPLETE_SIZE`
+(13 — a foundation always runs exactly A through K, one card per rank, so this reliably
+means the top card is the King). The underlying `GameState` card is left untouched
+(`faceUp` stays `true` in the actual data) — only a render-time copy is flipped, the same
+pattern already used elsewhere in this file (e.g. `placeCard`'s flip branch).
+
+Deliberately kept simple: the King renders face-down starting the very same render it
+completes the foundation (no separate "arrives face-up, then flips after settling"
+two-step animation) — a reasonable first cut for a cosmetic-only feature; revisit only if
+it actually looks abrupt in practice, not preemptively.
+
+## Rules question, confirmed not a rule: empty house doesn't force a waste-pile fill once reserve is empty
+
+Direct user question: "if there is an open house, I think it has to be put first from the
+waste pile, if the crapot [reserve] pile is empty." Checked against
+pagat.com/patience/crapette.html directly — **not a rule**. The compulsory
+"fill an empty house before drawing" requirement is explicitly scoped to reserve cards
+only ("If you have any cards in your reserve, then... you must fill any empty spaces in
+the tableau from your reserve") — the obligation ends once the reserve is empty. A waste
+card can still always be *voluntarily* played into an empty house (an empty house accepts
+any available card, from any source), it's just never forced. No code change — the
+engine already implements exactly this (`canDrawHand` in `moveResolver.ts` only gates on
+`p.reserve.length > 0 && hasEmptyHouse(state)`).
+
 ## Known limitation: mobile touch targets slightly under the 44×44px guideline
 
 The letterboxed scale on common phone portrait sizes (e.g. 375×667, 390×844) comes out

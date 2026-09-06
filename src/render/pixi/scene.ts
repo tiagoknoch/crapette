@@ -138,12 +138,25 @@ export interface TableScene {
   onPlayAgain: () => void;
   dragController: DragController;
   // Last rendered position + face-up state per card id, so placeCard can tell "this card just
-  // appeared here" (no entry — snap instantly) apart from "this card just moved here from
-  // somewhere else" (tween) or "this card just turned face up/down in place" (flip). Cleared
-  // on a fresh deal (see main.ts) — card ids are stable (suit+rank+copy, not randomized, see
-  // deck.ts) so a stale entry from a finished game would otherwise make the next game's
-  // opening deal appear to slide/flip in from the old game's state.
-  cardRenderState: Map<string, { point: Point; faceUp: boolean }>;
+  // appeared here" (no entry, or a stale one — snap instantly) apart from "this card just
+  // moved here from somewhere else" (tween) or "this card just turned face up/down in place"
+  // (flip). Cleared on a fresh deal (see main.ts) — card ids are stable (suit+rank+copy, not
+  // randomized, see deck.ts) so a stale entry from a finished game would otherwise make the
+  // next game's opening deal appear to slide/flip in from the old game's state.
+  //
+  // `generation` is what makes an entry "stale" apart from just "present": only the TOP card
+  // of a stacked pile (hand/waste/reserve/foundation — see drawStackedPile/drawTopCardOnly)
+  // gets a placeCard call each render; a card buried underneath simply isn't touched until it
+  // resurfaces, potentially many renders (and many other pile moves) later. Without this,
+  // placeCard would trust that old entry as a genuine "previous position" and animate the
+  // card sliding in from wherever it happened to last be visible (often a waste pile, since
+  // most cards pass through one) instead of just appearing — a real, confirmed bug (a card
+  // resurfacing as a new pile's top would visibly fly in from an unrelated, long-stale spot).
+  // An entry only counts as a valid animation source if its generation is EXACTLY one behind
+  // the current render's — i.e. it was placed on the immediately preceding render, so it's
+  // known to have been continuously, visibly at that position until right now.
+  cardRenderState: Map<string, { point: Point; faceUp: boolean; generation: number }>;
+  renderGeneration: number;
 }
 
 interface Slot {
@@ -348,9 +361,14 @@ function flipCard(app: Application, sprite: Sprite, newTexture: Texture): void {
 // carried here (see DragController.consumeJustDragged — that motion already happened, live,
 // under the pointer).
 function placeCard(scene: TableScene, sprite: Sprite, card: Card, owner: PlayerId, point: Point): void {
-  const previous = scene.cardRenderState.get(card.id);
+  const stored = scene.cardRenderState.get(card.id);
+  // Only trust a stored entry as a genuine "where this card was, continuously, until just
+  // now" if it was set on the immediately preceding render — anything older means the card
+  // was buried (not this pile's top) for at least one render in between and its position is
+  // stale, not a real place to animate from (see the field comment on cardRenderState).
+  const previous = stored && stored.generation === scene.renderGeneration - 1 ? stored : undefined;
   const justDragged = scene.dragController.consumeJustDragged(card.id);
-  scene.cardRenderState.set(card.id, { point, faceUp: card.faceUp });
+  scene.cardRenderState.set(card.id, { point, faceUp: card.faceUp, generation: scene.renderGeneration });
 
   const samePoint = previous !== undefined && previous.point.x === point.x && previous.point.y === point.y;
 
@@ -543,7 +561,19 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
   // which fires only after app.screen has actually been updated.
   app.renderer.on('resize', applyLetterbox);
 
-  return { app, root, cardsLayer, overlayLayer, feedbackText, turnText, onSlotClick, onPlayAgain, dragController, cardRenderState: new Map() };
+  return {
+    app,
+    root,
+    cardsLayer,
+    overlayLayer,
+    feedbackText,
+    turnText,
+    onSlotClick,
+    onPlayAgain,
+    dragController,
+    cardRenderState: new Map(),
+    renderGeneration: 0,
+  };
 }
 
 // Purely visual, drawn once — every slot's base grid position, whether or not it currently
@@ -746,6 +776,11 @@ function drawEndScreen(layer: Container, state: GameState, onPlayAgain: () => vo
   layer.addChild(buttonText);
 }
 
+// A foundation runs exactly A(1) through K(13), one card per rank (canPlayToFoundation
+// only ever allows the next rank up) — so `cards.length === FOUNDATION_COMPLETE_SIZE`
+// reliably means the top card is the King and the run is done.
+const FOUNDATION_COMPLETE_SIZE = 13;
+
 // Foundations only ever show their top card (§2/§3) — the rest is simply not the
 // visible/available one, and there's no useful "how many are underneath" signal for a
 // foundation the way there is for a stock pile.
@@ -754,7 +789,14 @@ function drawTopCardOnly(scene: TableScene, layer: Container, cards: Card[], poi
     drawEmptyHitZone(layer, ref, point, scene.onSlotClick);
     return;
   }
-  const card = cards[cards.length - 1];
+  const rawCard = cards[cards.length - 1];
+  // Display-only convention (pagat.com's rules page: "it is usual to turn the King
+  // face-down to indicate that the foundation pile is complete") — doesn't touch the
+  // actual GameState card, and doesn't need to: a full foundation already naturally
+  // accepts no further cards (canPlayToFoundation only allows the next rank up), so this
+  // has no legality consequence, purely a "this one's done" visual signal.
+  const complete = cards.length === FOUNDATION_COMPLETE_SIZE;
+  const card = complete ? { ...rawCard, faceUp: false } : rawCard;
   const sprite = createCardSprite(card);
   placeCard(scene, sprite, card, 'human', point);
   makeClickable(sprite, ref, scene.onSlotClick);
@@ -858,6 +900,7 @@ function turnLabel(state: GameState): string {
 }
 
 export function renderGameState(scene: TableScene, state: GameState, selected: PileRef | null, flash: FeedbackFlash | null): void {
+  scene.renderGeneration += 1;
   scene.dragController.setState(state);
   scene.cardsLayer.removeChildren();
   const table = computeTableLayout();
