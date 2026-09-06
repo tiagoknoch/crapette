@@ -4,7 +4,7 @@
 // middle; each player's talon/waste/reserve sits in its own row above (cpu) or below (human)
 // that middle grid, mirrored left-right between the two rows just like the physical game.
 // Kept free of Pixi imports — it's just geometry, easy to unit-test independent of rendering.
-import type { PlayerId } from '../engine/types.ts';
+import type { FoundationSlot, PlayerId, Suit } from '../engine/types.ts';
 
 // The source card art's natural size (htdebeer/SVG-cards, see public/cards/CREDIT.md) is
 // 169.075×244.64 — this is that aspect ratio, not a pixel size (the art is vector, rasterized
@@ -45,6 +45,37 @@ export const LOGICAL_HEIGHT = 2 * ROW_MARGIN + TOTAL_ROWS * CARD_HEIGHT + (TOTAL
 // +1 fans rightward (human, on the right column), -1 fans leftward (cpu, on the left
 // column) — always away from the foundations in between.
 export const HOUSE_FAN_SIGN: Record<PlayerId, 1 | -1> = { human: 1, cpu: -1 };
+
+// §14: per direct user direction, foundations always visually group by suit, one suit per
+// row (both decks' copies of a suit share a row, one per column) — alternating black/red
+// row-to-row for legibility. This is a *display-only* convention: the engine still treats
+// all 8 foundations as interchangeable (any empty one accepts any ace, see moveResolver.ts)
+// — nothing about legality depends on this ordering, only where a card is drawn.
+export const FOUNDATION_ROW_SUIT: [Suit, Suit, Suit, Suit] = ['S', 'H', 'C', 'D'];
+
+// Maps each real engine foundation index (state.foundations[i]) to the visual grid position
+// it should render at, grouped by FOUNDATION_ROW_SUIT — returns displayOrder such that
+// displayOrder[visualPosition] = realFoundationIndex. A suit can never claim more than 2 of
+// the 8 slots (there are only 2 aces of any suit across both decks), so every suit's row
+// always has exactly 2 slots to fill: however many are already suited, plus enough
+// still-unassigned (suit === null) slots — taken in original index order, so which *empty*
+// slot backs a given visual position stays stable across renders — to make 2.
+export function computeFoundationDisplayOrder(foundations: FoundationSlot[]): number[] {
+  const bySuit: Record<Suit, number[]> = { S: [], H: [], D: [], C: [] };
+  const unassigned: number[] = [];
+  foundations.forEach((f, i) => {
+    if (f.suit) bySuit[f.suit].push(i);
+    else unassigned.push(i);
+  });
+
+  const displayOrder: number[] = [];
+  for (const suit of FOUNDATION_ROW_SUIT) {
+    const claimed = bySuit[suit];
+    const filler = unassigned.splice(0, 2 - claimed.length);
+    displayOrder.push(...claimed, ...filler);
+  }
+  return displayOrder;
+}
 
 export interface Point {
   x: number;

@@ -65,6 +65,18 @@ and then upscaled by the browser, independent of any texture's own resolution.
 bit bigger") — everything else in `layout.ts` derives from it, so this alone rescales the
 whole table proportionally.
 
+**Foundations always visually group by suit, one suit per row, alternating black/red row-
+to-row** — per direct user direction ("in the foundation pile the rows have to be the same
+suit... looks good to be black/red/black/red"). This is *display-only*: the engine still
+treats all 8 `state.foundations` slots as interchangeable (any empty one accepts any ace —
+unchanged, still correct per §2/moveResolver.ts, still fully covered by its existing
+tests). `layout.ts`'s `computeFoundationDisplayOrder` (own test file,
+`layout.test.ts` — the one piece of `/render` logic that's actually worth unit-testing,
+unlike pixel geometry) maps each real foundation index to a visual grid position grouped by
+`FOUNDATION_ROW_SUIT`; `scene.ts`'s `renderGameState`/`effectiveSlotPoint` both go through
+it, so a card's *engine* index (what moves/flashes operate on) and its *displayed* position
+can differ, but a click on a displayed card still resolves to the correct real index.
+
 Step 7 is also complete: `src/state/gameStore.ts` owns the mutable `GameState`, the
 current selection, and a transient rejection "flash". `handleSlotClick` is the single
 entry point every pile click resolves through — click a card to pick it up, click a

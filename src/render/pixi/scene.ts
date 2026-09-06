@@ -14,6 +14,7 @@ import {
   HOUSE_OVERLAP_X,
   LOGICAL_HEIGHT,
   LOGICAL_WIDTH,
+  computeFoundationDisplayOrder,
   computeTableLayout,
   type PlayerRowLayout,
   type Point,
@@ -122,10 +123,17 @@ function refsEqual(a: PileRef, b: PileRef): boolean {
   return false;
 }
 
-// A house's *actual* clickable/visual position drifts as it fans out (see drawHouse) — this
-// resolves a ref to where it really is right now, not just its base grid slot, so the flash
-// overlay lands on the same spot the click hit-tested against.
+// A house's *actual* clickable/visual position drifts as it fans out (see drawHouse), and a
+// foundation's real engine index isn't necessarily where it's displayed (see
+// computeFoundationDisplayOrder) — this resolves a ref to where it really is right now, not
+// just its raw base grid slot, so the flash overlay lands on the same spot the click
+// hit-tested against.
 function effectiveSlotPoint(state: GameState, ref: PileRef): Point | undefined {
+  if (ref.type === 'foundation') {
+    const table = computeTableLayout();
+    const visualPosition = computeFoundationDisplayOrder(state.foundations).indexOf(ref.index);
+    return table.foundations[visualPosition];
+  }
   const base = allBaseSlots().find((s) => refsEqual(s.ref, ref))?.point;
   if (!base || ref.type !== 'house') return base;
   const count = state.players[ref.owner].houses[ref.index].length;
@@ -452,8 +460,14 @@ export function renderGameState(scene: TableScene, state: GameState, selected: P
   const table = computeTableLayout();
   drawPlayerRow(scene.cardsLayer, state, 'cpu', table.cpu, selected, scene.onSlotClick);
   drawPlayerRow(scene.cardsLayer, state, 'human', table.human, selected, scene.onSlotClick);
-  state.foundations.forEach((foundation, i) =>
-    drawTopCardOnly(scene.cardsLayer, foundation.cards, table.foundations[i], { type: 'foundation', index: i }, scene.onSlotClick),
+  computeFoundationDisplayOrder(state.foundations).forEach((realIndex, visualPosition) =>
+    drawTopCardOnly(
+      scene.cardsLayer,
+      state.foundations[realIndex].cards,
+      table.foundations[visualPosition],
+      { type: 'foundation', index: realIndex },
+      scene.onSlotClick,
+    ),
   );
 
   if (flash) {
