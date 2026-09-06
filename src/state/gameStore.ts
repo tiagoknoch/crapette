@@ -296,6 +296,30 @@ export function cpuStep(): void {
   notify();
 }
 
+// Shared by both the tap flow (source = the prior tap's `selected`) and the drag flow
+// (source = wherever the drag gesture picked up from, see attemptDragMove) — everything
+// past "we have a source and a distinct target" is identical for either input gesture.
+// Doesn't touch `selected`, except where matching the original tap behavior requires it
+// (the discard branch clears it unconditionally; that's a harmless no-op for drag, which
+// never sets `selected` to begin with).
+function resolveMove(source: PileRef, target: PileRef, mover: PlayerId): void {
+  // Special case: targeting your own waste while your own drawn hand card is the source
+  // means "discard it" — waste is otherwise always a forbidden destination for a regular
+  // move (rules.ts), so this can't be reached any other way.
+  if (source.type === 'hand' && source.owner === mover && target.type === 'waste' && target.owner === mover) {
+    discardDrawn(mover);
+    selected = null;
+    return;
+  }
+
+  const card = topCardOf(state, source);
+  if (!card) {
+    selected = null;
+    return;
+  }
+  attemptMove({ card, from: source, to: target }, mover);
+}
+
 // The single entry point for every click on a pile slot (whether it currently holds a card
 // or is empty) — see comment atop this file for the overall reactive-only interaction model.
 // Only the human seat is click-driven (the CPU seat auto-plays via cpuStep on a timer, see
@@ -325,22 +349,32 @@ export function handleSlotClick(ref: PileRef): void {
     return;
   }
 
-  // Special case: clicking your own waste while your own drawn hand card is selected means
-  // "discard it" — waste is otherwise always a forbidden destination for a regular move
-  // (rules.ts), so this can't be reached any other way.
-  if (selected.type === 'hand' && selected.owner === mover && ref.type === 'waste' && ref.owner === mover) {
-    discardDrawn(mover);
-    selected = null;
-    notify();
-    return;
-  }
+  resolveMove(selected, ref, mover);
+  notify();
+}
 
-  const card = topCardOf(state, selected);
-  if (!card) {
-    selected = null;
-    notify();
-    return;
-  }
-  attemptMove({ card, from: selected, to: ref }, mover);
+// §14 step 10.5 (drag-and-drop, added alongside tap-to-select rather than replacing it):
+// a pure read-only check scene.ts's drag controller calls on `pointerdown` to decide
+// whether to start tracking a drag gesture at all — never mutates state, so speculatively
+// calling it (before knowing whether the gesture will turn out to be a tap or a real drag)
+// is free. Only ever true for an actual move source (reserve/house/waste/face-up hand,
+// see getAvailableSources) — the face-down talon's "draw" action stays tap-only, since
+// there's nowhere meaningful to drag it to (drawing just flips it face-up in place).
+export function canPickUp(ref: PileRef): boolean {
+  return state.status === 'in_progress' && state.turn === 'human' && isSelectableSource(ref, state.turn);
+}
+
+// Mirrors handleSlotClick's second-tap branch (resolveMove), but for a drag gesture that
+// picked `from` up and released over a different slot `to` — scene.ts's drag controller
+// calls this once per completed drag (never for a plain tap, and never when dropped back
+// onto its own origin), and it's responsible for its own notify() the same way
+// handleSlotClick is for taps, since nothing else triggers a re-render after a drop.
+export function attemptDragMove(from: PileRef, to: PileRef): void {
+  if (state.status !== 'in_progress' || state.turn !== 'human') return;
+  const mover = state.turn;
+  if (!isSelectableSource(from, mover)) return; // defensive; canPickUp already gated this at drag-start
+  const card = topCardOf(state, from);
+  log(`${mover} drags ${card ? cardLabel(card) : '?'}: ${pileLabel(from)} -> ${pileLabel(to)}`);
+  resolveMove(from, to, mover);
   notify();
 }

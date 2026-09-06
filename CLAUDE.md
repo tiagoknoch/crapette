@@ -181,6 +181,47 @@ built once in `createTableScene` rather than re-resolved every render, so if a s
 is added later those two would need to be redrawn on language change same as everything
 already inside `renderGameState` is.
 
+**Drag-and-drop is now also implemented, added alongside tap-to-select rather than
+replacing it** — per direct user direction, reversing (for this one gesture only) the
+step-7 "reactive-only" input decision's scope, but *not* its no-hints philosophy: dragging
+still shows no legal-destination highlighting, matching the existing tap flow (per direct
+user direction: highlighting mid-drag is deferred behind a future settings toggle, not
+built now). `gameStore.ts` exposes two new pure/self-contained exports for this — `
+canPickUp(ref)` (read-only: is this ref currently a legal move source for the human on
+turn, i.e. would `isSelectableSource` accept it — the face-down talon is deliberately
+excluded, since drawing just flips it face-up in place and has no meaningful drop target)
+and `attemptDragMove(from, to)` (the atomic drag-completion action: mirrors
+`handleSlotClick`'s second-tap branch via a shared `resolveMove(source, target, mover)`
+helper both now call, and is responsible for its own `notify()` the same way
+`handleSlotClick` is for taps). Neither touches `selected` in any way that changes the tap
+flow's existing behavior — `resolveMove`'s "clear `selected`" calls are harmless no-ops for
+a drag, which never sets `selected` to begin with.
+
+All the actual drag mechanics live in `scene.ts`'s `createDragController` (mirrors Pixi
+v8's own official drag-and-drop example: `app.stage` is made `eventMode: 'static'` with
+`hitArea: app.screen` so stage-wide `pointermove`/`pointerup`/`pointerupoutside` listening
+works regardless of what's under the pointer; `applyLetterbox`'s resize handler now also
+refreshes `app.stage.hitArea` each resize, since a `Rectangle` hitArea is a snapshot, not
+live-bound to `app.screen`). `drawStackedPile`/`drawHouse` call `dragController.attach()`
+on the top-card sprite alongside the existing `makeClickable` tap wiring (foundations never
+do — per §2/moveResolver.ts, a foundation is never a legal move *source*, only ever a
+destination, so `drawTopCardOnly` stays tap-only). On `pointerdown`, if `canPickUp` passes,
+the sprite is reparented into a new `dragLayer` (topmost card layer, added between
+`cardsLayer` and `overlayLayer`) and follows the pointer (converted to `root`-local logical
+space via `root.toLocal`) until release; movement past a small `DRAG_MOVE_THRESHOLD` (6
+logical px) is what distinguishes a real drag from a plain tap — below it, `endDrag` just
+snaps the sprite back to its origin and does nothing else, deliberately leaving Pixi's own
+`pointertap` (unaffected by the brief reparent) to fire the normal tap-to-select path for
+that gesture. Above the threshold, `endDrag` hit-tests the release point against every
+`allBaseSlots()` ref's *current* `effectiveSlotPoint` (so a fanned house or a
+suit-grouped foundation position resolves the same way a real tap-to-target already does)
+and, if it lands on a different pile than the drag started from, calls `onDrop` (wired to
+`attemptDragMove` in `main.ts`) — otherwise the drag is silently cancelled, sprite already
+snapped back. A rejected drop gets the exact same red-flash-overlay + reason-banner
+feedback a rejected tap gets (verified manually: dragging a card onto an illegal house
+target shows "Doesn't fit that house..." and the card visibly returns to its origin pile,
+never actually leaving it).
+
 Nothing under `/src/ui` exists yet — no `localStorage` persistence/autosave (step 11).
 
 The engine/AI/CLI/render/state code is still young — fields or functions with no

@@ -2,7 +2,7 @@ import './style.css';
 import { deal } from './engine/deck.ts';
 import { initI18n } from './i18n/index.ts';
 import { createTableScene, renderGameState } from './render/pixi/scene.ts';
-import { cpuStep, getFlash, getSelected, getState, handleSlotClick, initGameStore, subscribe } from './state/gameStore.ts';
+import { attemptDragMove, canPickUp, cpuStep, getFlash, getSelected, getState, handleSlotClick, initGameStore, subscribe } from './state/gameStore.ts';
 
 // §14 step 8: how often the CPU seat takes its next single action (one move, one draw, or
 // resolving its drawn card) while it's the CPU's turn — cpuStep() is a no-op otherwise, so
@@ -35,11 +35,12 @@ async function main(): Promise<void> {
     render();
   };
 
-  const scene = await createTableScene(
-    container,
-    (ref) => handleSlotClick(ref),
-    () => newGame(),
-  );
+  const scene = await createTableScene(container, {
+    onSlotClick: (ref) => handleSlotClick(ref),
+    onPlayAgain: () => newGame(),
+    canPickUp: (ref) => canPickUp(ref),
+    onDrop: (from, to) => attemptDragMove(from, to),
+  });
   render = (): void => renderGameState(scene, getState(), getSelected(), getFlash());
   subscribe(render);
   render();

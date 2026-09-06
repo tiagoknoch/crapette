@@ -5,7 +5,7 @@
 // onSlotClick. What that click *means* (select / attempt a move / draw / discard) is
 // entirely gameStore.ts's call — deliberately reactive-only, no legal-destination
 // highlighting or preemptive disabling (see gameStore.ts's file comment for why).
-import { Application, Container, Graphics, type Sprite, Text } from 'pixi.js';
+import { Application, Container, type FederatedPointerEvent, Graphics, type Sprite, Text } from 'pixi.js';
 import { i18next } from '../../i18n/index.ts';
 import type { Card, GameState, PileRef, PlayerId } from '../../engine/types.ts';
 import {
@@ -71,6 +71,25 @@ export interface FeedbackFlash {
 }
 
 export type SlotClickHandler = (ref: PileRef) => void;
+export type CanPickUp = (ref: PileRef) => boolean;
+export type DropHandler = (from: PileRef, to: PileRef) => void;
+
+export interface TableSceneHandlers {
+  onSlotClick: SlotClickHandler;
+  onPlayAgain: () => void;
+  // §14 step 10.5: drag-and-drop, added alongside tap-to-select. canPickUp is a pure
+  // read-only check the drag controller calls on pointerdown to decide whether to start
+  // tracking a drag at all; onDrop fires once per completed drag (never for a plain tap,
+  // never for a drop back onto its own origin) — see gameStore.ts's canPickUp/
+  // attemptDragMove, which this is wired to in main.ts.
+  canPickUp: CanPickUp;
+  onDrop: DropHandler;
+}
+
+interface DragController {
+  setState(state: GameState): void;
+  attach(sprite: Sprite, ref: PileRef, homePoint: Point): void;
+}
 
 export interface TableScene {
   app: Application;
@@ -81,6 +100,7 @@ export interface TableScene {
   turnText: Text;
   onSlotClick: SlotClickHandler;
   onPlayAgain: () => void;
+  dragController: DragController;
 }
 
 interface Slot {
@@ -131,7 +151,96 @@ function effectiveSlotPoint(state: GameState, ref: PileRef): Point | undefined {
   return { x: base.x + Math.max(count - 1, 0) * sign * HOUSE_OVERLAP_X, y: base.y };
 }
 
-export async function createTableScene(container: HTMLElement, onSlotClick: SlotClickHandler, onPlayAgain: () => void): Promise<TableScene> {
+// Logical (root-local, pre-letterbox-scale) pixels of pointer movement before a pointerdown
+// counts as a drag rather than a plain tap — small enough that an intentional drag always
+// crosses it well before release, large enough that a slightly wobbly tap doesn't misfire as
+// a drag (which would otherwise skip past onSlotClick's own tap handling for that gesture).
+const DRAG_MOVE_THRESHOLD = 6;
+
+interface DragState {
+  ref: PileRef;
+  sprite: Sprite;
+  homePoint: Point;
+  startLocal: Point;
+  moved: boolean;
+}
+
+// §14 step 10.5: drag-and-drop, added alongside tap-to-select rather than replacing it (see
+// TableSceneHandlers). Deliberately no legal-destination highlighting mid-drag, matching the
+// established reactive-only philosophy (gameStore.ts's file comment) — illegal drops get the
+// same red-flash + reason banner a rejected tap gets, nothing is disabled or glowed in
+// advance. The dragged sprite is reparented into `dragLayer` (so it renders above every other
+// pile) for the gesture's duration and reparented back into `cardsLayer` the moment it ends,
+// regardless of outcome — a genuine move re-renders cardsLayer from scratch anyway, so that
+// reparent-back is only actually load-bearing for the tap/cancel paths.
+function createDragController(
+  app: Application,
+  root: Container,
+  cardsLayer: Container,
+  dragLayer: Container,
+  canPickUp: CanPickUp,
+  onDrop: DropHandler,
+): DragController {
+  let latestState: GameState | null = null;
+  let dragging: DragState | null = null;
+
+  function toLocal(event: FederatedPointerEvent): Point {
+    return root.toLocal(event.global);
+  }
+
+  function hitTestDrop(point: Point): PileRef | null {
+    if (!latestState) return null;
+    const state = latestState;
+    const hit = allBaseSlots().find(({ ref }) => {
+      const p = effectiveSlotPoint(state, ref);
+      return p !== undefined && Math.abs(point.x - p.x) <= CARD_WIDTH / 2 && Math.abs(point.y - p.y) <= CARD_HEIGHT / 2;
+    });
+    return hit?.ref ?? null;
+  }
+
+  function onMove(event: FederatedPointerEvent): void {
+    if (!dragging) return;
+    const local = toLocal(event);
+    dragging.sprite.position.set(local.x, local.y);
+    if (!dragging.moved && Math.hypot(local.x - dragging.startLocal.x, local.y - dragging.startLocal.y) > DRAG_MOVE_THRESHOLD) {
+      dragging.moved = true;
+    }
+  }
+
+  function endDrag(event: FederatedPointerEvent): void {
+    if (!dragging) return;
+    const { ref, sprite, homePoint, moved } = dragging;
+    dragging = null;
+    app.stage.off('pointermove', onMove);
+    cardsLayer.addChild(sprite);
+    sprite.position.set(homePoint.x, homePoint.y);
+    if (!moved) return; // a plain tap — onSlotClick's own pointertap handling covers it
+    const target = hitTestDrop(toLocal(event));
+    if (target && !refsEqual(target, ref)) onDrop(ref, target);
+  }
+
+  app.stage.eventMode = 'static';
+  app.stage.hitArea = app.screen;
+  app.stage.on('pointerup', endDrag);
+  app.stage.on('pointerupoutside', endDrag);
+
+  return {
+    setState(state: GameState): void {
+      latestState = state;
+    },
+    attach(sprite: Sprite, ref: PileRef, homePoint: Point): void {
+      sprite.on('pointerdown', (event: FederatedPointerEvent) => {
+        if (!canPickUp(ref)) return;
+        dragLayer.addChild(sprite);
+        dragging = { ref, sprite, homePoint, startLocal: toLocal(event), moved: false };
+        app.stage.on('pointermove', onMove);
+      });
+    },
+  };
+}
+
+export async function createTableScene(container: HTMLElement, handlers: TableSceneHandlers): Promise<TableScene> {
+  const { onSlotClick, onPlayAgain, canPickUp, onDrop } = handlers;
   const app = new Application();
   // `resolution` defaults to 1 (CSS px per physical px) — on any high-DPI/retina screen that
   // renders the whole canvas at a lower density than the display, then lets the browser
@@ -159,8 +268,13 @@ export async function createTableScene(container: HTMLElement, onSlotClick: Slot
   const cardsLayer = new Container();
   root.addChild(cardsLayer);
 
+  const dragLayer = new Container();
+  root.addChild(dragLayer);
+
   const overlayLayer = new Container();
   root.addChild(overlayLayer);
+
+  const dragController = createDragController(app, root, cardsLayer, dragLayer, canPickUp, onDrop);
 
   const feedbackText = new Text({
     text: '',
@@ -207,6 +321,10 @@ export async function createTableScene(container: HTMLElement, onSlotClick: Slot
     root.scale.set(scale);
     root.x = (app.screen.width - LOGICAL_WIDTH * scale) / 2;
     root.y = (app.screen.height - LOGICAL_HEIGHT * scale) / 2;
+    // `app.stage.hitArea` is a snapshot Rectangle, not live-bound to `app.screen` — refresh it
+    // whenever the screen resizes so the drag controller's stage-wide pointermove/pointerup
+    // tracking (see createDragController) keeps covering the whole canvas.
+    app.stage.hitArea = app.screen;
   };
   applyLetterbox();
   // `resizeTo` doesn't resize synchronously with the window's own 'resize' event (it's
@@ -214,7 +332,7 @@ export async function createTableScene(container: HTMLElement, onSlotClick: Slot
   // which fires only after app.screen has actually been updated.
   app.renderer.on('resize', applyLetterbox);
 
-  return { app, root, cardsLayer, overlayLayer, feedbackText, turnText, onSlotClick, onPlayAgain };
+  return { app, root, cardsLayer, overlayLayer, feedbackText, turnText, onSlotClick, onPlayAgain, dragController };
 }
 
 // Purely visual, drawn once — every slot's base grid position, whether or not it currently
@@ -385,7 +503,16 @@ function drawStackFiller(layer: Container, point: Point, layerIndex: number): vo
 // foundation) — fan a few filler layers behind the top card so its thickness hints at how
 // much is left, per the request that you shouldn't have to guess whether the reserve is
 // nearly empty.
-function drawStackedPile(layer: Container, cards: Card[], point: Point, ref: PileRef, owner: PlayerId, lifted: boolean, onSlotClick: SlotClickHandler): void {
+function drawStackedPile(
+  layer: Container,
+  cards: Card[],
+  point: Point,
+  ref: PileRef,
+  owner: PlayerId,
+  lifted: boolean,
+  onSlotClick: SlotClickHandler,
+  dragController: DragController,
+): void {
   if (cards.length === 0) {
     drawEmptyHitZone(layer, ref, point, onSlotClick);
     return;
@@ -395,8 +522,10 @@ function drawStackedPile(layer: Container, cards: Card[], point: Point, ref: Pil
     drawStackFiller(layer, point, i);
   }
   const sprite = createCardSprite(cards[cards.length - 1], owner);
-  sprite.position.set(point.x, point.y - (lifted ? SELECTED_LIFT_Y : 0));
+  const spritePoint = { x: point.x, y: point.y - (lifted ? SELECTED_LIFT_Y : 0) };
+  sprite.position.set(spritePoint.x, spritePoint.y);
   makeClickable(sprite, ref, onSlotClick);
+  dragController.attach(sprite, ref, spritePoint);
   layer.addChild(sprite);
   if (lifted) drawSelectionBorder(layer, point);
   drawCountBadge(layer, point, cards.length);
@@ -407,35 +536,60 @@ function drawStackedPile(layer: Container, cards: Card[], point: Point, ref: Pil
 // legible, matching Russian Bank's traditional physical layout. Only the actual top
 // (available) card is clickable; a house long enough to run its fan off the edge of the
 // canvas is a real (if rare) visual edge case left for a later polish pass.
-function drawHouse(layer: Container, cards: Card[], point: Point, ref: PileRef, owner: PlayerId, lifted: boolean, onSlotClick: SlotClickHandler): void {
+function drawHouse(
+  layer: Container,
+  cards: Card[],
+  point: Point,
+  ref: PileRef,
+  owner: PlayerId,
+  lifted: boolean,
+  onSlotClick: SlotClickHandler,
+  dragController: DragController,
+): void {
   if (cards.length === 0) {
     drawEmptyHitZone(layer, ref, point, onSlotClick);
     return;
   }
   const sign = HOUSE_FAN_SIGN[owner];
   let topSprite: Sprite | undefined;
+  let topSpritePoint: Point | undefined;
   cards.forEach((card, i) => {
     const sprite = createCardSprite(card);
     const isTop = i === cards.length - 1;
-    sprite.position.set(point.x + i * sign * HOUSE_OVERLAP_X, point.y - (isTop && lifted ? SELECTED_LIFT_Y : 0));
+    const cardPoint = { x: point.x + i * sign * HOUSE_OVERLAP_X, y: point.y - (isTop && lifted ? SELECTED_LIFT_Y : 0) };
+    sprite.position.set(cardPoint.x, cardPoint.y);
     layer.addChild(sprite);
-    if (isTop) topSprite = sprite;
+    if (isTop) {
+      topSprite = sprite;
+      topSpritePoint = cardPoint;
+    }
   });
-  if (topSprite) makeClickable(topSprite, ref, onSlotClick);
+  if (topSprite && topSpritePoint) {
+    makeClickable(topSprite, ref, onSlotClick);
+    dragController.attach(topSprite, ref, topSpritePoint);
+  }
   if (lifted) drawSelectionBorder(layer, { x: point.x + (cards.length - 1) * sign * HOUSE_OVERLAP_X, y: point.y });
   drawCountBadge(layer, point, cards.length);
 }
 
-function drawPlayerRow(layer: Container, state: GameState, player: PlayerId, row: PlayerRowLayout, selected: PileRef | null, onSlotClick: SlotClickHandler): void {
+function drawPlayerRow(
+  layer: Container,
+  state: GameState,
+  player: PlayerId,
+  row: PlayerRowLayout,
+  selected: PileRef | null,
+  onSlotClick: SlotClickHandler,
+  dragController: DragController,
+): void {
   const p = state.players[player];
   const isSelected = (type: 'hand' | 'waste' | 'reserve'): boolean => selected !== null && selected.type === type && selected.owner === player;
-  drawStackedPile(layer, p.hand, row.hand, { type: 'hand', owner: player }, player, isSelected('hand'), onSlotClick);
-  drawStackedPile(layer, p.waste, row.waste, { type: 'waste', owner: player }, player, isSelected('waste'), onSlotClick);
-  drawStackedPile(layer, p.reserve, row.reserve, { type: 'reserve', owner: player }, player, isSelected('reserve'), onSlotClick);
+  drawStackedPile(layer, p.hand, row.hand, { type: 'hand', owner: player }, player, isSelected('hand'), onSlotClick, dragController);
+  drawStackedPile(layer, p.waste, row.waste, { type: 'waste', owner: player }, player, isSelected('waste'), onSlotClick, dragController);
+  drawStackedPile(layer, p.reserve, row.reserve, { type: 'reserve', owner: player }, player, isSelected('reserve'), onSlotClick, dragController);
   p.houses.forEach((house, i) => {
     const index = i as 0 | 1 | 2 | 3;
     const lifted = selected !== null && selected.type === 'house' && selected.owner === player && selected.index === index;
-    drawHouse(layer, house, row.houses[i], { type: 'house', owner: player, index }, player, lifted, onSlotClick);
+    drawHouse(layer, house, row.houses[i], { type: 'house', owner: player, index }, player, lifted, onSlotClick, dragController);
   });
 }
 
@@ -447,10 +601,11 @@ function turnLabel(state: GameState): string {
 }
 
 export function renderGameState(scene: TableScene, state: GameState, selected: PileRef | null, flash: FeedbackFlash | null): void {
+  scene.dragController.setState(state);
   scene.cardsLayer.removeChildren();
   const table = computeTableLayout();
-  drawPlayerRow(scene.cardsLayer, state, 'cpu', table.cpu, selected, scene.onSlotClick);
-  drawPlayerRow(scene.cardsLayer, state, 'human', table.human, selected, scene.onSlotClick);
+  drawPlayerRow(scene.cardsLayer, state, 'cpu', table.cpu, selected, scene.onSlotClick, scene.dragController);
+  drawPlayerRow(scene.cardsLayer, state, 'human', table.human, selected, scene.onSlotClick, scene.dragController);
   computeFoundationDisplayOrder(state.foundations).forEach((realIndex, visualPosition) =>
     drawTopCardOnly(
       scene.cardsLayer,
