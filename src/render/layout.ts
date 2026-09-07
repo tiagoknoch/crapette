@@ -23,6 +23,14 @@ export const CARD_HEIGHT = Math.round(CARD_WIDTH * CARD_ASPECT);
 // columns in the middle (cpu's houses fan left, human's fan right) — see HOUSE_FAN_SIGN.
 export const HOUSE_OVERLAP_X = 26;
 
+// Redesign v2 handoff: a full-width chrome band pinned to the very top of the logical
+// canvas (toolbar — see scene.ts), in both portrait and landscape. A fixed logical-unit
+// value, not a ratio of CARD_WIDTH (DESIGN_RULES.md §1's ratio table doesn't cover it —
+// the handoff's own derivation table holds the toolbar constant across viewports while
+// the card size varies). Folded into rowY() so every row in both arrangements shifts down
+// by exactly this much, leaving a clean top band no card ever reaches.
+export const TOOLBAR_HEIGHT = 56;
+
 // Gap from the true canvas edge — used for the talon/waste/reserve row's outer slots,
 // which don't fan and so don't need extra clearance.
 const ROW_MARGIN = 60;
@@ -51,13 +59,13 @@ const MIDDLE_WIDTH = MIDDLE_COLUMNS * CARD_WIDTH + (MIDDLE_COLUMNS - 1) * COLUMN
 const MIDDLE_HEIGHT = MIDDLE_ROWS * CARD_HEIGHT + (MIDDLE_ROWS - 1) * ROW_GAP;
 
 export const LOGICAL_WIDTH = 2 * GRID_MARGIN + MIDDLE_WIDTH;
-export const LOGICAL_HEIGHT = 2 * ROW_MARGIN + TOTAL_ROWS * CARD_HEIGHT + (TOTAL_ROWS - 1) * ROW_GAP;
+export const LOGICAL_HEIGHT = TOOLBAR_HEIGHT + 2 * ROW_MARGIN + TOTAL_ROWS * CARD_HEIGHT + (TOTAL_ROWS - 1) * ROW_GAP;
 
 // Landscape's middle block sits between the two flanks rather than at the canvas edge, so its
 // horizontal origin is derived from the flank width + clearance instead of GRID_MARGIN.
 const LANDSCAPE_MIDDLE_ORIGIN = ROW_MARGIN + CARD_WIDTH + HOUSE_FAN_ALLOWANCE;
 export const LOGICAL_WIDTH_LANDSCAPE = 2 * ROW_MARGIN + 2 * CARD_WIDTH + 2 * HOUSE_FAN_ALLOWANCE + MIDDLE_WIDTH;
-export const LOGICAL_HEIGHT_LANDSCAPE = 2 * ROW_MARGIN + MIDDLE_HEIGHT;
+export const LOGICAL_HEIGHT_LANDSCAPE = TOOLBAR_HEIGHT + 2 * ROW_MARGIN + MIDDLE_HEIGHT;
 
 // +1 fans rightward (human, on the right column), -1 fans leftward (cpu, on the left
 // column) — always away from the foundations in between.
@@ -130,7 +138,7 @@ export function logicalSize(mode: TableMode): { width: number; height: number } 
 }
 
 function rowY(rowIndex: number): number {
-  return ROW_MARGIN + CARD_HEIGHT / 2 + rowIndex * (CARD_HEIGHT + ROW_GAP);
+  return TOOLBAR_HEIGHT + ROW_MARGIN + CARD_HEIGHT / 2 + rowIndex * (CARD_HEIGHT + ROW_GAP);
 }
 
 // `origin` is the x-coordinate of the middle block's own left edge — portrait derives it

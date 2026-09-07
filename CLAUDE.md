@@ -31,8 +31,10 @@ Feature-complete v1: engine, CPU heuristic AI, PixiJS rendering (tap-to-select +
 drag-and-drop, tweened moves/flips), i18n (en/pt with a manual switcher), and
 localStorage autosave/resume are all built and working. Nothing under `/src/ui` exists
 as a separate directory — all HUD/modal code (pile counts, end screen, About/Legal, New
-Game confirm, How to Play, language toggle) lives directly in
-`src/render/pixi/scene.ts`. See `docs/build-log.md` for the full step-by-step history.
+Game confirm popover, How to Play, Settings stub, EN/PT toolbar toggle) lives directly in
+`src/render/pixi/scene.ts`, in a top toolbar band (replacing an earlier footer row — see
+`docs/known-issues.md`'s toolbar entry). See `docs/build-log.md` for the full step-by-step
+history.
 
 The engine/AI/CLI/render/state code is still young — fields or functions with no usages
 elsewhere in the repo are safe to add, rename, or remove as the implementation is worked
@@ -78,7 +80,7 @@ portrait and landscape are fully supported. See `docs/known-issues.md`.)
   `docs/known-issues.md`.
 - **`layout.ts`'s `TableMode` (`'portrait'`/`'landscape'`) is chosen by aspect ratio**
   (`chooseTableMode`, width ≥ height → landscape) and can change live on resize — `scene.ts`
-  rebuilds its mode-dependent static chrome (backdrop, slot outlines, footer/HUD
+  rebuilds its mode-dependent static chrome (backdrop, slot outlines, toolbar/HUD
   positions) whenever that happens, and fires `onModeChange` so `main.ts` re-renders
   gameplay content too. A change here needs both halves kept in sync, not just
   `computeTableLayout`'s geometry.

@@ -27,15 +27,22 @@ const en = {
     scoreLine: 'You: {{human}} pts · CPU: {{cpu}} pts',
     playAgain: 'Play Again',
   },
-  footer: {
-    aboutLegal: 'About / Legal',
+  toolbar: {
+    wordmark: 'Crapette',
+    qualifier: 'RUSSIAN BANK',
+    about: 'About / Legal',
     newGame: 'New Game',
     howToPlay: 'How to Play',
+    settings: 'Settings',
   },
   newGameConfirm: {
-    message: 'Start a new game? Your current progress will be lost.',
-    confirm: 'Start new game',
-    cancel: 'Cancel',
+    message: 'Start a new game? Your game in progress will be discarded.',
+    confirm: 'New Game',
+    keepPlaying: 'Keep Playing',
+  },
+  settings: {
+    aboutLegalTitle: 'About / Legal',
+    aboutLegalSub: 'Card art, engine, licenses',
   },
   board: {
     emptyHouse: 'EMPTY HOUSE',

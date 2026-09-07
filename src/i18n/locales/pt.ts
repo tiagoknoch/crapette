@@ -29,15 +29,22 @@ const pt = {
     scoreLine: 'Você: {{human}} pts · CPU: {{cpu}} pts',
     playAgain: 'Jogar Novamente',
   },
-  footer: {
-    aboutLegal: 'Sobre / Legal',
+  toolbar: {
+    wordmark: 'Crapette',
+    qualifier: 'BANCO RUSSO',
+    about: 'Sobre / Legal',
     newGame: 'Novo Jogo',
     howToPlay: 'Como Jogar',
+    settings: 'Configurações',
   },
   newGameConfirm: {
-    message: 'Começar um novo jogo? Seu progresso atual será perdido.',
-    confirm: 'Começar novo jogo',
-    cancel: 'Cancelar',
+    message: 'Começar um novo jogo? Seu jogo em andamento será descartado.',
+    confirm: 'Novo Jogo',
+    keepPlaying: 'Continuar Jogando',
+  },
+  settings: {
+    aboutLegalTitle: 'Sobre / Legal',
+    aboutLegalSub: 'Arte das cartas, motor, licenças',
   },
   board: {
     emptyHouse: 'CASA VAZIA',

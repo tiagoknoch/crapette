@@ -120,6 +120,7 @@ async function main(): Promise<void> {
     canPickUp: (ref) => canPickUp(ref),
     onDrop: (from, to) => attemptDragMove(from, to),
     onNewGameRequest: () => newGame(),
+    isGameInProgress: () => getState().status === 'in_progress',
     onLanguageChange: () => render(),
     onModeChange: () => render(),
   });

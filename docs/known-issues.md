@@ -233,6 +233,49 @@ entry in this file — an interactive `Graphics` empty-foundation slot silently 
 click, which is what led to discovering the Graphics-hit-test-failure rule is broader than
 originally scoped.
 
+## Feature: top toolbar replaces the footer nav (redesign v2 handoff)
+
+A second, corrected design-handoff package (`Crapette card game UI mockups/
+design_handoff_crapette_board/README.md` + `DESIGN_RULES.md`) superseded the first
+handoff's "derive card size from the binding axis in pixels" instruction (wrong for this
+codebase — card size only changes via the logical canvas's aspect ratio) and specified a
+top toolbar band replacing the old footer row: wordmark + "RUSSIAN BANK" qualifier on the
+left, NEW GAME / HOW TO PLAY / SETTINGS / ABOUT plus an EN/PT segmented control on the
+right. Implemented as its own logical-canvas band (`TOOLBAR_HEIGHT` in `layout.ts`, folded
+into `rowY()` so both portrait and landscape shift down by exactly that much), per
+`DESIGN_RULES.md` §5's "chrome goes where no card can reach" rule — not a DOM overlay.
+
+Per direct user scope decision, **SETTINGS ships as a stub**: the toolbar item opens a
+small popover with exactly one row, "About / Legal", which opens the existing About modal.
+Deck art / Table view / Pile layout rows (all real settings the v2 handoff specifies) stay
+out until those features actually exist — same reasoning as the first redesign round's
+Settings deferral above.
+
+**NEW GAME's confirmation moved from a centered modal to a popover anchored under the
+toolbar button**, and gained a condition the old confirm-modal flow didn't have: with no
+game in progress (fresh load, or right after the current one ended) it acts immediately,
+matching "Play Again"'s existing behavior — the popover only appears when there's actually
+something to lose. This needed a new `isGameInProgress()` handler threaded from `main.ts`
+into `TableSceneHandlers`.
+
+**These new popovers (New Game, Settings) never use a `Graphics` for their "tap outside to
+close" or "tap the panel without closing" behavior** — both route through invisible `Text`
+hit zones (`drawInvisibleHitZone` in `scene.ts`), even though the *existing* About/Rules
+modal backdrops already do use an interactive `Graphics` and are documented above as
+re-verified working. This file's own rule says not to add a *new* Graphics-based button
+anywhere in `scene.ts`, so new code stays conservative rather than assuming the existing
+exception extends to it.
+
+**Deferred to a later round** (not built this pass, flagged so a future session doesn't
+have to re-derive scope from the handoff again): the "fan clamp" bug fix (house fans are
+currently unbounded-width and can run over the waste — `DESIGN_RULES.md` §6, flagged as the
+one must-fix item in the v2 handoff); the landscape geometry constants
+(`LANDSCAPE_ROW_MARGIN = 24`, `HOUSE_FAN_ALLOWANCE = 286`) and the `pileLayout` (ROWS/
+SIDES) setting; Settings real content; drag-state polish; the drawn-card play/discard
+panel; the live CPU move-description indicator; and a `docs/tech-spec.md` §5 touch-up once
+the geometry constants land. The pulsing legal-target ring and dashed loadable-pile ring
+remain out of scope for the same architecture-rule reason as the first redesign round.
+
 ## Rules question, confirmed not a rule: empty house doesn't force a waste-pile fill once reserve is empty
 
 Direct user question: "if there is an open house, I think it has to be put first from the

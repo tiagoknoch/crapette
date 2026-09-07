@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseTableMode, computeFoundationDisplayOrder, computeTableLayout, FOUNDATION_ROW_SUIT } from './layout.ts';
+import { chooseTableMode, computeFoundationDisplayOrder, computeTableLayout, FOUNDATION_ROW_SUIT, TOOLBAR_HEIGHT } from './layout.ts';
 import type { FoundationSlot } from '../engine/types.ts';
 
 function emptyFoundations(): FoundationSlot[] {
@@ -99,5 +99,29 @@ describe('computeTableLayout landscape branch', () => {
     expect(landscape.cpu.waste.y).toBeLessThan(landscape.cpu.hand.y);
     expect(landscape.human.hand.y).toBeLessThan(landscape.human.waste.y);
     expect(landscape.human.waste.y).toBeLessThan(landscape.human.reserve.y);
+  });
+});
+
+describe('TOOLBAR_HEIGHT', () => {
+  it('reserves a full-width band at the very top of the logical canvas in both modes', () => {
+    // No slot in either arrangement may render above the toolbar band — every row-derived
+    // y-coordinate must clear TOOLBAR_HEIGHT by at least half a card height (the topmost
+    // row's center sits at TOOLBAR_HEIGHT + ROW_MARGIN + CARD_HEIGHT / 2).
+    const portrait = computeTableLayout('portrait');
+    const landscape = computeTableLayout('landscape');
+    const allYs = (layout: ReturnType<typeof computeTableLayout>): number[] => [
+      layout.cpu.hand.y,
+      layout.cpu.waste.y,
+      layout.cpu.reserve.y,
+      layout.human.hand.y,
+      layout.human.waste.y,
+      layout.human.reserve.y,
+      ...layout.cpu.houses.map((p) => p.y),
+      ...layout.human.houses.map((p) => p.y),
+      ...layout.foundations.map((p) => p.y),
+    ];
+    for (const y of [...allYs(portrait), ...allYs(landscape)]) {
+      expect(y).toBeGreaterThan(TOOLBAR_HEIGHT);
+    }
   });
 });

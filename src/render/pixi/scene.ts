@@ -10,7 +10,7 @@
 // forced state the engine already computes for click-gating — see renderGameState's
 // `compulsory` param.
 import { Application, Container, FillGradient, type FederatedPointerEvent, Graphics, Rectangle, type Sprite, Text, type Texture } from 'pixi.js';
-import { i18next, SUPPORTED_LANGUAGES, setLanguage, type SupportedLanguage } from '../../i18n/index.ts';
+import { i18next, SUPPORTED_LANGUAGES, setLanguage } from '../../i18n/index.ts';
 import type { Card, GameState, Move, PileRef, PlayerId, Suit } from '../../engine/types.ts';
 import {
   CARD_HEIGHT,
@@ -25,6 +25,7 @@ import {
   type PlayerRowLayout,
   type Point,
   type TableMode,
+  TOOLBAR_HEIGHT,
 } from '../layout.ts';
 import { cardTexture, createCardSprite, preloadCardTextures } from './cardSprites.ts';
 
@@ -35,7 +36,6 @@ const FELT_INNER_COLOR = 0x2a4e3a; // oklch(0.39 0.055 158)
 const FELT_OUTER_COLOR = 0x0e2619; // oklch(0.245 0.04 158)
 const PANEL_GROUND_COLOR = 0x07180f; // oklch(0.19 0.03 158)
 const INK_COLOR = 0xf7f4ec;
-const INK_SECONDARY_ALPHA = 0.65;
 const HAIRLINE_ALPHA = 0.16;
 const GOLD_COLOR = 0xd5b36a; // oklch(0.78 0.10 85)
 const GOLD_INK_COLOR = 0xf0d08f; // oklch(0.87 0.09 85)
@@ -69,8 +69,8 @@ const STACK_FILLER_COLOR = 0xece5d8;
 const STACK_FILLER_BORDER_ALPHA = 0.25;
 
 const SELECTED_LIFT_Y = 12;
-const FEEDBACK_TEXT_Y = 26;
-const TURN_TEXT_Y = 54;
+const FEEDBACK_TEXT_Y = TOOLBAR_HEIGHT + 26;
+const TURN_TEXT_Y = TOOLBAR_HEIGHT + 54;
 const BANNER_TEXT_Y = TURN_TEXT_Y + 34;
 
 // §14 step 12: how long a card takes to slide from its previous rendered position to its new
@@ -98,25 +98,49 @@ const OVERLAY_BUTTON_Y_OFFSET = 60;
 const PLAY_AGAIN_BUTTON_WIDTH = 170;
 const PLAY_AGAIN_BUTTON_HEIGHT = 46;
 
-// §14 step 9: footer row + the About/Legal modal it opens (LGPL-2.1 attribution for the
-// vendored card art per §12 — see public/cards/CREDIT.md). Extended later (still §14) with
-// three more footer entries — New Game, How to Play, and a language toggle — all sharing the
-// same dim-backdrop-plus-panel modal look as the About/Legal one.
-const FOOTER_LINK_Y_OFFSET = -20;
+// §14 step 9: the About/Legal modal (LGPL-2.1 attribution for the vendored card art per
+// §12 — see public/cards/CREDIT.md), plus the How to Play modal — both share the same
+// dim-backdrop-plus-panel look. Originally opened from a footer row; the redesign v2
+// handoff (README.md §0) replaces that footer with the top toolbar below.
 const ABOUT_PANEL_WIDTH = 560;
 const ABOUT_PANEL_HEIGHT = 300;
 const RULES_PANEL_WIDTH = 680;
 const RULES_PANEL_HEIGHT = 800;
-const CONFIRM_PANEL_WIDTH = 440;
-const CONFIRM_PANEL_HEIGHT = 170;
-const CONFIRM_BUTTON_WIDTH = 170;
-const CONFIRM_BUTTON_HEIGHT = 42;
 
-// Proper names, not translated content — a language's own name for itself ("Português") is
-// conventionally written the same way regardless of the UI's current language, unlike every
-// other string in this file. The footer toggle always shows the *other* language's name (the
-// one you'd switch to), not the current one.
-const LANGUAGE_AUTONYM: Record<SupportedLanguage, string> = { en: 'English', pt: 'Português' };
+// Redesign v2 handoff, README.md §0 / DESIGN_RULES.md §3,§8 — the top toolbar band and its
+// two anchored popovers (New Game confirm, Settings stub). Sizes/alphas quoted directly
+// from the handoff; `letterSpacing` values are already the px conversion of the handoff's
+// em tracking figures (DESIGN_RULES.md §3's table — Pixi letterSpacing is px, not em).
+const TOOLBAR_BG_ALPHA = 0.22;
+const TOOLBAR_BORDER_ALPHA = 0.09;
+const TOOLBAR_PADDING_X = 32;
+const TOOLBAR_ITEM_GAP = 32;
+const TOOLBAR_DIVIDER_ALPHA = 0.16;
+const TOOLBAR_LABEL_ALPHA = 0.62;
+const TOOLBAR_LABEL_LETTER_SPACING = 1.5; // .14em @ 11px
+const WORDMARK_FONT_SIZE = 21;
+const QUALIFIER_FONT_SIZE = 9.5;
+const QUALIFIER_LETTER_SPACING = 1.7; // .18em @ 9.5px
+const QUALIFIER_ALPHA = 0.45;
+const DIVIDER_HEIGHT = 19;
+const HOVER_UNDERLINE_BLEED = 12;
+const HOVER_UNDERLINE_HEIGHT = 2;
+
+const SEGMENTED_TRACK_ALPHA = 0.06;
+const SEGMENTED_PADDING = 3;
+const SEGMENTED_LABEL_GAP = 2;
+const SEGMENTED_LABEL_FONT_SIZE = 10;
+const SEGMENTED_LABEL_PAD_X = 10;
+const SEGMENTED_TRACK_HEIGHT = 22;
+
+const POPOVER_TOP_MARGIN = 10;
+const POPOVER_SIDE_MARGIN = 16;
+const POPOVER_PADDING = 18;
+const POPOVER_BUTTON_HEIGHT = 38;
+const POPOVER_BUTTON_GAP = 9;
+const POPOVER_BUTTON_PAD_X = 16;
+const NEW_GAME_POPOVER_WIDTH = 322;
+const SETTINGS_POPOVER_WIDTH = 300;
 
 export interface FeedbackFlash {
   ref: PileRef;
@@ -137,14 +161,18 @@ export interface TableSceneHandlers {
   // attemptDragMove, which this is wired to in main.ts.
   canPickUp: CanPickUp;
   onDrop: DropHandler;
-  // Footer "New Game" → confirm dialog → this — deals a fresh game the same way "Play Again"
-  // does (main.ts wires both to the same function), just reachable mid-game, not only once
-  // one has ended.
+  // Toolbar "NEW GAME" → confirm popover → this — deals a fresh game the same way "Play
+  // Again" does (main.ts wires both to the same function), just reachable mid-game, not
+  // only once one has ended.
   onNewGameRequest: () => void;
-  // Fires after the footer language toggle has already switched i18next's active language
-  // and refreshed every static (built-once) Text on screen — main.ts just needs to re-render
-  // with the current GameState so turn/flash/end-screen text (already dynamic, rebuilt every
-  // renderGameState call) picks up the new language too.
+  // Redesign v2 handoff (README.md §0): NEW GAME "confirms in place" only while a game is
+  // actually in progress — with none in progress (fresh load, or after the current one just
+  // ended) it acts immediately, no popover, matching "Play Again"'s existing behavior.
+  isGameInProgress: () => boolean;
+  // Fires after the toolbar's EN/PT segmented control has already switched i18next's active
+  // language and refreshed every static (built-once) Text on screen — main.ts just needs to
+  // re-render with the current GameState so turn/flash/end-screen text (already dynamic,
+  // rebuilt every renderGameState call) picks up the new language too.
   onLanguageChange: () => void;
   // Redesign: fires when a resize crosses the portrait/landscape aspect threshold, after the
   // scene's own static chrome (backdrop, slot outlines, footer/HUD positions) has already
@@ -438,10 +466,6 @@ function placeCard(scene: TableScene, sprite: Sprite, card: Card, owner: PlayerI
   animateCardTo(scene.app, sprite, previous.point, point);
 }
 
-function otherLanguage(): SupportedLanguage {
-  return SUPPORTED_LANGUAGES.find((lang) => lang !== i18next.language) ?? 'en';
-}
-
 // Approximates the design's `radial-gradient(105% 78% at 50% 50%, ...)` felt background —
 // Pixi's radial gradient is circular by default, `scale` elongates it to roughly match the
 // mockup's wider-than-tall ellipse for any canvas shape (portrait or landscape).
@@ -462,7 +486,7 @@ function feltGradientFill(width: number, height: number): FillGradient {
 }
 
 export async function createTableScene(container: HTMLElement, handlers: TableSceneHandlers): Promise<TableScene> {
-  const { onSlotClick, onPlayAgain, canPickUp, onDrop, onNewGameRequest, onLanguageChange, onModeChange } = handlers;
+  const { onSlotClick, onPlayAgain, canPickUp, onDrop, onNewGameRequest, isGameInProgress, onLanguageChange, onModeChange } = handlers;
   const app = new Application();
   // `resolution` defaults to 1 (CSS px per physical px) — on any high-DPI/retina screen that
   // renders the whole canvas at a lower density than the display, then lets the browser
@@ -538,30 +562,244 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
   bannerText.anchor.set(0.5, 0);
   root.addChild(bannerText);
 
-  // §14: footer row — New Game | How to Play | language toggle | About/Legal. Pure
-  // presentation, no game-state involvement, so it all lives outside the gameStore/
-  // renderGameState pipeline; each entry either toggles its own static modal layer's
-  // visibility directly, or (language) switches i18next's active language in place.
-  function makeFooterButton(text: string): Text {
-    const t = new Text({ text, style: { fill: INK_COLOR, fontFamily: FONT_MONO, fontSize: 12, letterSpacing: 1 } });
-    t.anchor.set(0.5);
-    t.alpha = INK_SECONDARY_ALPHA;
-    t.eventMode = 'static';
-    t.cursor = 'pointer';
-    return t;
+  // Redesign v2 handoff (README.md §0): a full-width toolbar band pinned to the top of the
+  // logical canvas, replacing the old bottom footer row. Pure presentation, no game-state
+  // involvement, so it lives outside the gameStore/renderGameState pipeline; each entry
+  // either toggles its own layer's visibility directly, or (language) switches i18next's
+  // active language in place.
+  const toolbarBand = new Graphics();
+  root.addChild(toolbarBand);
+
+  const wordmarkText = new Text({ text: i18next.t('toolbar.wordmark'), style: { fill: INK_COLOR, fontFamily: FONT_SERIF, fontSize: WORDMARK_FONT_SIZE } });
+  wordmarkText.anchor.set(0, 0.5);
+  root.addChild(wordmarkText);
+
+  const wordmarkDivider = new Graphics();
+  root.addChild(wordmarkDivider);
+
+  const qualifierText = new Text({
+    text: i18next.t('toolbar.qualifier'),
+    style: { fill: INK_COLOR, fontFamily: FONT_MONO, fontSize: QUALIFIER_FONT_SIZE, fontWeight: '500', letterSpacing: QUALIFIER_LETTER_SPACING },
+  });
+  qualifierText.anchor.set(0, 0.5);
+  qualifierText.alpha = QUALIFIER_ALPHA;
+  root.addChild(qualifierText);
+
+  // Each modal/popover layer starts empty and hidden; its content is built fresh every time
+  // it opens rather than once up front and merely toggled visible — see drawTextModal's
+  // comment for why (a real PixiJS hit-testing gotcha, not stylistic preference).
+  const aboutLayer = new Container();
+  aboutLayer.visible = false;
+  root.addChild(aboutLayer);
+
+  const rulesLayer = new Container();
+  rulesLayer.visible = false;
+  root.addChild(rulesLayer);
+
+  const newGamePopoverLayer = new Container();
+  newGamePopoverLayer.visible = false;
+  root.addChild(newGamePopoverLayer);
+
+  const settingsPopoverLayer = new Container();
+  settingsPopoverLayer.visible = false;
+  root.addChild(settingsPopoverLayer);
+
+  function openAboutLayer(): void {
+    aboutLayer.visible = true;
+    aboutLayer.removeChildren();
+    drawTextModal(aboutLayer, ABOUT_PANEL_WIDTH, ABOUT_PANEL_HEIGHT, i18next.t('about.title'), i18next.t('about.body'), logicalSize(mode), () => {
+      aboutLayer.visible = false;
+    });
   }
 
-  const newGameFooterButton = makeFooterButton(i18next.t('footer.newGame'));
-  root.addChild(newGameFooterButton);
+  interface ToolbarButton {
+    text: Text;
+    underline: Graphics;
+  }
 
-  const rulesFooterButton = makeFooterButton(i18next.t('footer.howToPlay'));
-  root.addChild(rulesFooterButton);
+  // A toolbar label carries its own hover underline (a Graphics sibling, toggled — never
+  // interactive itself) and its own hit target, per the standing rule that interactivity
+  // lives on a Text, never a Graphics (see makeButtonHitTarget's comment). The tap handler
+  // is attached once, here, at creation time; layoutToolbar() only ever updates position and
+  // hitArea afterward — re-attaching a listener on every layout pass would stack duplicate
+  // handlers and fire the action multiple times per click.
+  function makeToolbarButton(label: string, onTap: () => void): ToolbarButton {
+    const text = new Text({
+      text: label,
+      style: { fill: INK_COLOR, fontFamily: FONT_MONO, fontSize: 11, fontWeight: '500', letterSpacing: TOOLBAR_LABEL_LETTER_SPACING },
+    });
+    text.anchor.set(0.5);
+    text.alpha = TOOLBAR_LABEL_ALPHA;
+    makeButtonHitTarget(text, 1, 1, onTap); // real size set per layout in layoutToolbar
+    root.addChild(text);
+    const underline = new Graphics();
+    underline.visible = false;
+    root.addChild(underline);
+    text.on('pointerover', () => {
+      text.alpha = 1;
+      underline.visible = true;
+    });
+    text.on('pointerout', () => {
+      text.alpha = TOOLBAR_LABEL_ALPHA;
+      underline.visible = false;
+    });
+    return { text, underline };
+  }
 
-  const languageFooterButton = makeFooterButton(LANGUAGE_AUTONYM[otherLanguage()]);
-  root.addChild(languageFooterButton);
+  const newGameButton = makeToolbarButton(i18next.t('toolbar.newGame'), () => {
+    if (!isGameInProgress()) {
+      onNewGameRequest();
+      return;
+    }
+    if (newGamePopoverLayer.visible) {
+      newGamePopoverLayer.visible = false;
+      return;
+    }
+    settingsPopoverLayer.visible = false;
+    newGamePopoverLayer.visible = true;
+    newGamePopoverLayer.removeChildren();
+    drawNewGamePopover(
+      newGamePopoverLayer,
+      newGameButton.text.x,
+      logicalSize(mode),
+      () => {
+        newGamePopoverLayer.visible = false;
+        onNewGameRequest();
+      },
+      () => {
+        newGamePopoverLayer.visible = false;
+      },
+    );
+  });
 
-  const aboutFooterButton = makeFooterButton(i18next.t('footer.aboutLegal'));
-  root.addChild(aboutFooterButton);
+  const rulesButton = makeToolbarButton(i18next.t('toolbar.howToPlay'), () => {
+    if (rulesLayer.visible) {
+      rulesLayer.visible = false;
+      return;
+    }
+    rulesLayer.visible = true;
+    rulesLayer.removeChildren();
+    drawTextModal(rulesLayer, RULES_PANEL_WIDTH, RULES_PANEL_HEIGHT, i18next.t('rules.title'), i18next.t('rules.body'), logicalSize(mode), () => {
+      rulesLayer.visible = false;
+    });
+  });
+
+  const settingsButton = makeToolbarButton(i18next.t('toolbar.settings'), () => {
+    if (settingsPopoverLayer.visible) {
+      settingsPopoverLayer.visible = false;
+      return;
+    }
+    newGamePopoverLayer.visible = false;
+    settingsPopoverLayer.visible = true;
+    settingsPopoverLayer.removeChildren();
+    drawSettingsPopover(
+      settingsPopoverLayer,
+      settingsButton.text.x,
+      logicalSize(mode),
+      () => {
+        settingsPopoverLayer.visible = false;
+        openAboutLayer();
+      },
+      () => {
+        settingsPopoverLayer.visible = false;
+      },
+    );
+  });
+
+  const aboutButton = makeToolbarButton(i18next.t('toolbar.about'), () => {
+    if (aboutLayer.visible) {
+      aboutLayer.visible = false;
+      return;
+    }
+    openAboutLayer();
+  });
+
+  const toolbarDivider = new Graphics();
+  root.addChild(toolbarDivider);
+
+  // EN/PT segmented control — replaces the old single-toggle footer language button with
+  // both languages shown at once, the active one on a gold pill (README.md §0).
+  const segmentedTrack = new Graphics();
+  root.addChild(segmentedTrack);
+  const segmentedPill = new Graphics();
+  root.addChild(segmentedPill);
+  const segmentedLabels = SUPPORTED_LANGUAGES.map((lang) => {
+    const text = new Text({ text: lang.toUpperCase(), style: { fill: INK_COLOR, fontFamily: FONT_MONO, fontSize: SEGMENTED_LABEL_FONT_SIZE, fontWeight: '500' } });
+    text.anchor.set(0.5);
+    makeButtonHitTarget(text, 1, 1, () => {
+      if (lang === i18next.language) return;
+      setLanguage(lang).then(() => {
+        refreshStaticText();
+        onLanguageChange();
+      });
+    });
+    root.addChild(text);
+    return { lang, text };
+  });
+
+  // Every mode-dependent piece of *static* chrome (built once, not per-renderGameState-call)
+  // gets repositioned/redrawn here — called at startup, on every resize (toolbar item widths
+  // depend on the logical width), and again whenever a resize crosses the portrait/landscape
+  // aspect threshold (see the resize handler below). Gameplay content (cardsLayer/
+  // overlayLayer) doesn't need a mirror of this: it's already fully rebuilt every
+  // renderGameState call, so simply triggering one (onModeChange) picks up the new mode.
+  function layoutToolbar(width: number): void {
+    toolbarBand.clear().rect(0, 0, width, TOOLBAR_HEIGHT).fill({ color: 0x000000, alpha: TOOLBAR_BG_ALPHA });
+    toolbarBand
+      .moveTo(0, TOOLBAR_HEIGHT - 0.5)
+      .lineTo(width, TOOLBAR_HEIGHT - 0.5)
+      .stroke({ color: INK_COLOR, alpha: TOOLBAR_BORDER_ALPHA, width: 1 });
+
+    let leftX = TOOLBAR_PADDING_X;
+    wordmarkText.position.set(leftX, TOOLBAR_HEIGHT / 2);
+    leftX += wordmarkText.width + 14;
+    wordmarkDivider.clear().rect(leftX, (TOOLBAR_HEIGHT - DIVIDER_HEIGHT) / 2, 1, DIVIDER_HEIGHT).fill({ color: INK_COLOR, alpha: TOOLBAR_DIVIDER_ALPHA });
+    leftX += 1 + 14;
+    qualifierText.position.set(leftX, TOOLBAR_HEIGHT / 2);
+
+    // Right group, right-to-left: segmented control, a divider, then the four buttons —
+    // widths are measured (not assumed), since string length varies by locale.
+    const labelWidths = segmentedLabels.map(({ text }) => text.width);
+    const pillWidths = labelWidths.map((w) => w + SEGMENTED_LABEL_PAD_X * 2);
+    const trackWidth = SEGMENTED_PADDING * 2 + pillWidths[0] + SEGMENTED_LABEL_GAP + pillWidths[1];
+    const trackX = width - TOOLBAR_PADDING_X - trackWidth;
+    const trackY = (TOOLBAR_HEIGHT - SEGMENTED_TRACK_HEIGHT) / 2;
+    segmentedTrack
+      .clear()
+      .roundRect(trackX, trackY, trackWidth, SEGMENTED_TRACK_HEIGHT, SEGMENTED_TRACK_HEIGHT / 2)
+      .fill({ color: INK_COLOR, alpha: SEGMENTED_TRACK_ALPHA });
+
+    const activeIndex = segmentedLabels.findIndex(({ lang }) => lang === i18next.language);
+    segmentedPill.clear();
+    let pillX = trackX + SEGMENTED_PADDING;
+    segmentedLabels.forEach(({ text }, i) => {
+      const pillWidth = pillWidths[i];
+      if (i === activeIndex) {
+        const pillHeight = SEGMENTED_TRACK_HEIGHT - SEGMENTED_PADDING * 2;
+        segmentedPill.roundRect(pillX, trackY + SEGMENTED_PADDING, pillWidth, pillHeight, pillHeight / 2).fill(GOLD_COLOR);
+      }
+      text.style.fill = i === activeIndex ? GOLD_LABEL_COLOR : INK_COLOR;
+      text.position.set(pillX + pillWidth / 2, TOOLBAR_HEIGHT / 2);
+      text.hitArea = new Rectangle(-pillWidth / 2, -SEGMENTED_TRACK_HEIGHT / 2, pillWidth, SEGMENTED_TRACK_HEIGHT);
+      pillX += pillWidth + SEGMENTED_LABEL_GAP;
+    });
+
+    let rightEdge = trackX - TOOLBAR_ITEM_GAP;
+    toolbarDivider.clear().rect(rightEdge - 1, (TOOLBAR_HEIGHT - DIVIDER_HEIGHT) / 2, 1, DIVIDER_HEIGHT).fill({ color: INK_COLOR, alpha: TOOLBAR_DIVIDER_ALPHA });
+    rightEdge -= 1 + TOOLBAR_ITEM_GAP;
+
+    for (const button of [aboutButton, settingsButton, rulesButton, newGameButton]) {
+      const labelWidth = button.text.width;
+      const centerX = rightEdge - labelWidth / 2;
+      button.text.position.set(centerX, TOOLBAR_HEIGHT / 2);
+      button.text.hitArea = new Rectangle(-labelWidth / 2 - 8, -TOOLBAR_HEIGHT / 2, labelWidth + 16, TOOLBAR_HEIGHT);
+      button.underline.clear();
+      button.underline
+        .rect(centerX - labelWidth / 2 - HOVER_UNDERLINE_BLEED, TOOLBAR_HEIGHT - HOVER_UNDERLINE_HEIGHT, labelWidth + HOVER_UNDERLINE_BLEED * 2, HOVER_UNDERLINE_HEIGHT)
+        .fill(GOLD_COLOR);
+      rightEdge -= labelWidth + TOOLBAR_ITEM_GAP;
+    }
+  }
 
   // Every mode-dependent piece of *static* chrome (built once, not per-renderGameState-call)
   // gets repositioned/redrawn here — called at startup and again whenever a resize crosses
@@ -577,85 +815,24 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
     feedbackText.position.set(width / 2, FEEDBACK_TEXT_Y);
     turnText.position.set(width / 2, TURN_TEXT_Y);
     bannerText.position.set(width / 2, BANNER_TEXT_Y);
-    const footerY = height + FOOTER_LINK_Y_OFFSET;
-    newGameFooterButton.position.set(width * (1 / 5), footerY);
-    rulesFooterButton.position.set(width * (2 / 5), footerY);
-    languageFooterButton.position.set(width * (3 / 5), footerY);
-    aboutFooterButton.position.set(width * (4 / 5), footerY);
+    layoutToolbar(width);
   }
   layoutChrome();
 
-  // Each modal layer starts empty and hidden; its content is built fresh every time it opens
-  // rather than once up front and merely toggled visible — see drawTextModal's comment for
-  // why (a real PixiJS hit-testing gotcha, not stylistic preference).
-  const aboutLayer = new Container();
-  aboutLayer.visible = false;
-  root.addChild(aboutLayer);
-  aboutFooterButton.on('pointertap', () => {
-    if (aboutLayer.visible) {
-      aboutLayer.visible = false;
-      return;
-    }
-    aboutLayer.visible = true;
-    aboutLayer.removeChildren();
-    drawTextModal(aboutLayer, ABOUT_PANEL_WIDTH, ABOUT_PANEL_HEIGHT, i18next.t('about.title'), i18next.t('about.body'), logicalSize(mode), () => {
-      aboutLayer.visible = false;
-    });
-  });
-
-  const rulesLayer = new Container();
-  rulesLayer.visible = false;
-  root.addChild(rulesLayer);
-  rulesFooterButton.on('pointertap', () => {
-    if (rulesLayer.visible) {
-      rulesLayer.visible = false;
-      return;
-    }
-    rulesLayer.visible = true;
-    rulesLayer.removeChildren();
-    drawTextModal(rulesLayer, RULES_PANEL_WIDTH, RULES_PANEL_HEIGHT, i18next.t('rules.title'), i18next.t('rules.body'), logicalSize(mode), () => {
-      rulesLayer.visible = false;
-    });
-  });
-
-  const confirmLayer = new Container();
-  confirmLayer.visible = false;
-  root.addChild(confirmLayer);
-  newGameFooterButton.on('pointertap', () => {
-    confirmLayer.visible = true;
-    confirmLayer.removeChildren();
-    drawConfirmModal(
-      confirmLayer,
-      i18next.t('newGameConfirm.message'),
-      i18next.t('newGameConfirm.confirm'),
-      i18next.t('newGameConfirm.cancel'),
-      logicalSize(mode),
-      () => {
-        confirmLayer.visible = false;
-        onNewGameRequest();
-      },
-      () => {
-        confirmLayer.visible = false;
-      },
-    );
-  });
-
-  // Only the persistent footer labels need refreshing on a language switch — the three
-  // modals above always rebuild with the current language on their next open anyway.
+  // Only the persistent toolbar labels need refreshing on a language switch — the layered
+  // modals/popovers above always rebuild with the current language on their next open
+  // anyway. Also re-runs layoutToolbar since every label's measured width (and therefore the
+  // whole right group's position) can change when the copy changes language.
   function refreshStaticText(): void {
-    newGameFooterButton.text = i18next.t('footer.newGame');
-    rulesFooterButton.text = i18next.t('footer.howToPlay');
-    languageFooterButton.text = LANGUAGE_AUTONYM[otherLanguage()];
-    aboutFooterButton.text = i18next.t('footer.aboutLegal');
+    wordmarkText.text = i18next.t('toolbar.wordmark');
+    qualifierText.text = i18next.t('toolbar.qualifier');
+    newGameButton.text.text = i18next.t('toolbar.newGame');
+    rulesButton.text.text = i18next.t('toolbar.howToPlay');
+    settingsButton.text.text = i18next.t('toolbar.settings');
+    aboutButton.text.text = i18next.t('toolbar.about');
+    layoutToolbar(logicalSize(mode).width);
   }
   refreshStaticText();
-
-  languageFooterButton.on('pointertap', () => {
-    setLanguage(otherLanguage()).then(() => {
-      refreshStaticText();
-      onLanguageChange();
-    });
-  });
 
   const applyLetterbox = (): void => {
     const { width, height } = logicalSize(mode);
@@ -896,61 +1073,113 @@ function makeButtonHitTarget(text: Text, width: number, height: number, onTap: (
   text.on('pointertap', onTap);
 }
 
-// §14: the "New Game" footer entry's confirmation dialog — discarding an in-progress game is
-// exactly the kind of hard-to-reverse action worth an explicit "are you sure?" rather than
-// acting on the first click. Rebuilt fresh on every open, same reasoning as drawTextModal.
-function drawConfirmModal(
-  layer: Container,
-  message: string,
-  confirmLabel: string,
-  cancelLabel: string,
-  logical: { width: number; height: number },
-  onConfirm: () => void,
-  onCancel: () => void,
-): void {
-  const backdrop = new Graphics().rect(0, 0, logical.width, logical.height).fill({ color: 0x000000, alpha: OVERLAY_BG_ALPHA });
-  backdrop.eventMode = 'static';
-  backdrop.on('pointertap', onCancel);
-  layer.addChild(backdrop);
+// Redesign v2 handoff (README.md §0): a small panel anchored below the toolbar item that
+// opened it — unlike the full-screen, centered About/Rules modals. Rebuilt fresh on every
+// open, same reasoning as drawTextModal. Deliberately never Graphics-interactive: even
+// "tap outside to close" and "tapping the panel itself doesn't close it" route through
+// invisible Text hit zones (see drawEmptyHitZone above) — this file must not gain a new
+// Graphics-based button (see known-issues.md's Graphics hit-test entry).
+function drawInvisibleHitZone(layer: Container, x: number, y: number, width: number, height: number, onTap: () => void): void {
+  const hit = new Text({ text: '', style: { fontSize: 1 } });
+  hit.anchor.set(0.5);
+  hit.position.set(x, y);
+  makeButtonHitTarget(hit, width, height, onTap);
+  layer.addChild(hit);
+}
 
-  const panelX = (logical.width - CONFIRM_PANEL_WIDTH) / 2;
-  const panelY = (logical.height - CONFIRM_PANEL_HEIGHT) / 2;
-  const panel = new Graphics().roundRect(panelX, panelY, CONFIRM_PANEL_WIDTH, CONFIRM_PANEL_HEIGHT, 14).fill(PANEL_GROUND_COLOR).stroke({ color: INK_COLOR, alpha: HAIRLINE_ALPHA, width: 1 });
-  panel.eventMode = 'static';
-  layer.addChild(panel);
+// Clamps the popover so it never runs past the canvas edge — the button that opened it can
+// sit anywhere along the toolbar, near either edge.
+function popoverAnchorX(buttonCenterX: number, popoverWidth: number, logicalWidth: number): number {
+  const raw = buttonCenterX - popoverWidth / 2;
+  return Math.min(Math.max(raw, POPOVER_SIDE_MARGIN), logicalWidth - POPOVER_SIDE_MARGIN - popoverWidth);
+}
 
-  const centerX = panelX + CONFIRM_PANEL_WIDTH / 2;
-  const messageText = new Text({
-    text: message,
-    style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 15, align: 'center', wordWrap: true, wordWrapWidth: CONFIRM_PANEL_WIDTH - 48 },
+function drawPopoverPanel(layer: Container, x: number, y: number, width: number, height: number, borderColor: number, borderAlpha: number): void {
+  layer.addChild(new Graphics().roundRect(x, y + 6, width, height, 12).fill({ color: CARD_SHADOW_COLOR, alpha: 0.35 }));
+  layer.addChild(new Graphics().roundRect(x, y, width, height, 12).fill(PANEL_GROUND_COLOR).stroke({ color: borderColor, alpha: borderAlpha, width: 1 }));
+}
+
+function drawPopoverButton(layer: Container, centerX: number, centerY: number, label: string, filled: boolean, onTap: () => void): number {
+  const text = new Text({
+    text: label,
+    style: { fill: filled ? GOLD_LABEL_COLOR : INK_COLOR, fontFamily: FONT_MONO, fontSize: 11, fontWeight: filled ? '600' : '500', letterSpacing: 1.1 },
   });
-  messageText.anchor.set(0.5, 0);
-  messageText.position.set(centerX, panelY + 24);
+  const width = text.width + POPOVER_BUTTON_PAD_X * 2;
+  const bg = new Graphics().roundRect(centerX - width / 2, centerY - POPOVER_BUTTON_HEIGHT / 2, width, POPOVER_BUTTON_HEIGHT, 10);
+  if (filled) bg.fill(GOLD_COLOR);
+  else bg.fill({ color: INK_COLOR, alpha: 0.04 }).stroke({ color: INK_COLOR, alpha: 0.2, width: 1 });
+  layer.addChild(bg);
+  text.anchor.set(0.5);
+  text.position.set(centerX, centerY);
+  makeButtonHitTarget(text, width, POPOVER_BUTTON_HEIGHT, onTap);
+  layer.addChild(text);
+  return width;
+}
+
+// New Game "confirms in place" (README.md §0) — only shown while a game is actually in
+// progress (see isGameInProgress in TableSceneHandlers); with none in progress it's never
+// called at all, the toolbar acts immediately instead.
+function drawNewGamePopover(layer: Container, anchorX: number, logical: { width: number; height: number }, onConfirm: () => void, onClose: () => void): void {
+  const width = NEW_GAME_POPOVER_WIDTH;
+  const x = popoverAnchorX(anchorX, width, logical.width);
+  const y = TOOLBAR_HEIGHT + POPOVER_TOP_MARGIN;
+
+  drawInvisibleHitZone(layer, logical.width / 2, logical.height / 2, logical.width, logical.height, onClose);
+
+  const messageText = new Text({
+    text: i18next.t('newGameConfirm.message'),
+    style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 14, lineHeight: 20, wordWrap: true, wordWrapWidth: width - POPOVER_PADDING * 2 },
+  });
+  const buttonY = y + POPOVER_PADDING + messageText.height + 16 + POPOVER_BUTTON_HEIGHT / 2;
+  const height = POPOVER_PADDING * 2 + messageText.height + 16 + POPOVER_BUTTON_HEIGHT;
+
+  drawPopoverPanel(layer, x, y, width, height, GOLD_COLOR, 0.3);
+  drawInvisibleHitZone(layer, x + width / 2, y + height / 2, width, height, () => {}); // swallow taps on the panel itself
+  messageText.position.set(x + POPOVER_PADDING, y + POPOVER_PADDING);
   layer.addChild(messageText);
 
-  const buttonY = panelY + CONFIRM_PANEL_HEIGHT - 24 - CONFIRM_BUTTON_HEIGHT / 2;
-  const gap = 16;
+  // Measure both button labels before placing either, so the secondary (left) button's
+  // position can account for the primary (right) button's actual width.
+  const measure = (label: string, fontWeight: '500' | '600'): number =>
+    new Text({ text: label, style: { fontFamily: FONT_MONO, fontSize: 11, fontWeight, letterSpacing: 1.1 } }).width + POPOVER_BUTTON_PAD_X * 2;
+  const confirmLabel = i18next.t('newGameConfirm.confirm');
+  const keepLabel = i18next.t('newGameConfirm.keepPlaying');
+  const confirmWidth = measure(confirmLabel, '600');
+  const keepWidth = measure(keepLabel, '500');
+  const rightEdge = x + width - POPOVER_PADDING;
+  drawPopoverButton(layer, rightEdge - confirmWidth / 2, buttonY, confirmLabel, true, onConfirm);
+  drawPopoverButton(layer, rightEdge - confirmWidth - POPOVER_BUTTON_GAP - keepWidth / 2, buttonY, keepLabel, false, onClose);
+}
 
-  const cancelX = centerX - gap / 2 - CONFIRM_BUTTON_WIDTH;
-  layer.addChild(
-    new Graphics()
-      .roundRect(cancelX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, 10)
-      .fill({ color: INK_COLOR, alpha: 0.06 })
-      .stroke({ color: INK_COLOR, alpha: 0.2, width: 1 }),
-  );
-  const cancelButtonText = new Text({ text: cancelLabel, style: { fill: INK_COLOR, fontFamily: FONT_MONO, fontSize: 13, letterSpacing: 1 } });
-  cancelButtonText.anchor.set(0.5);
-  cancelButtonText.position.set(centerX - gap / 2 - CONFIRM_BUTTON_WIDTH / 2, buttonY);
-  makeButtonHitTarget(cancelButtonText, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, onCancel);
-  layer.addChild(cancelButtonText);
+// Settings stub (per this round's scope decision — see the plan/known-issues.md): the only
+// row that has anything real behind it today is the About/Legal one, so that's the only row
+// built. Deck art / Table view / Pile layout stay out until those features actually exist.
+function drawSettingsPopover(layer: Container, anchorX: number, logical: { width: number; height: number }, onOpenAbout: () => void, onClose: () => void): void {
+  const width = SETTINGS_POPOVER_WIDTH;
+  const x = popoverAnchorX(anchorX, width, logical.width);
+  const y = TOOLBAR_HEIGHT + POPOVER_TOP_MARGIN;
+  const rowHeight = 48;
+  const height = POPOVER_PADDING * 2 + rowHeight;
 
-  const confirmX = centerX + gap / 2;
-  layer.addChild(new Graphics().roundRect(confirmX, buttonY - CONFIRM_BUTTON_HEIGHT / 2, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, 10).fill(GOLD_COLOR));
-  const confirmButtonText = new Text({ text: confirmLabel, style: { fill: GOLD_LABEL_COLOR, fontFamily: FONT_MONO, fontSize: 13, fontWeight: '600', letterSpacing: 1 } });
-  confirmButtonText.anchor.set(0.5);
-  confirmButtonText.position.set(centerX + gap / 2 + CONFIRM_BUTTON_WIDTH / 2, buttonY);
-  makeButtonHitTarget(confirmButtonText, CONFIRM_BUTTON_WIDTH, CONFIRM_BUTTON_HEIGHT, onConfirm);
-  layer.addChild(confirmButtonText);
+  drawInvisibleHitZone(layer, logical.width / 2, logical.height / 2, logical.width, logical.height, onClose);
+  drawPopoverPanel(layer, x, y, width, height, INK_COLOR, HAIRLINE_ALPHA);
+
+  const rowCenterY = y + POPOVER_PADDING + rowHeight / 2;
+  const titleText = new Text({ text: i18next.t('settings.aboutLegalTitle'), style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 13.5 } });
+  titleText.position.set(x + POPOVER_PADDING, rowCenterY - 15);
+  const subText = new Text({ text: i18next.t('settings.aboutLegalSub'), style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 11 } });
+  subText.alpha = 0.45;
+  subText.position.set(x + POPOVER_PADDING, rowCenterY + 3);
+  const disclosure = new Text({ text: '›', style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 18 } });
+  disclosure.alpha = 0.45;
+  disclosure.anchor.set(1, 0.5);
+  disclosure.position.set(x + width - POPOVER_PADDING, rowCenterY);
+  layer.addChild(titleText, subText, disclosure);
+
+  drawInvisibleHitZone(layer, x + width / 2, rowCenterY, width - POPOVER_PADDING * 2, rowHeight, () => {
+    onClose();
+    onOpenAbout();
+  });
 }
 
 function endScreenTitle(state: GameState): string {
