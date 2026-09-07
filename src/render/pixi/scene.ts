@@ -335,6 +335,14 @@ interface DragState {
   // (see attach) — read continuously by onMove so the lift completes even if the pointer
   // holds still past the animation's own duration, not just while it happens to be moving.
   liftOffset: number;
+  // The sprite's own at-rest scale (createCardSprite sets width/height to CARD_WIDTH/
+  // CARD_HEIGHT, which Pixi achieves via a scale well under 1 — not scale 1 itself, since
+  // the vendored SVG art rasterizes well above card size for crispness, see cardSprites.ts).
+  // Captured once at pickup so the lift/shake animations below can scale *relative to this*
+  // instead of hardcoding "1" as if that were the sprite's normal size — hardcoding 1 was a
+  // real, confirmed bug: it made a lifted/held/shaking card render at roughly its native
+  // texture size, ~1.8x too big, for the entire gesture.
+  restScale: number;
 }
 
 // §14 step 10.5: drag-and-drop, added alongside tap-to-select rather than replacing it (see
@@ -403,7 +411,7 @@ function createDragController(
   // only removed once the shake finishes, revealing the real, unchanged card already sitting
   // motionless at homePoint in cardsLayer underneath (nothing about game state changed, so
   // that render never had anything to animate).
-  function shakeToHome(sprite: Sprite, home: Point): void {
+  function shakeToHome(sprite: Sprite, home: Point, restScale: number): void {
     const start = performance.now();
     const fromX = sprite.position.x;
     const fromY = sprite.position.y;
@@ -416,7 +424,7 @@ function createDragController(
       const rotationEnvelope = Math.sin(t * Math.PI); // 0 -> 1 -> 0, peaks mid-shake
       sprite.position.set(fromX + (home.x - fromX) * eased + oscillation, fromY + (home.y - fromY) * eased);
       sprite.rotation = SHAKE_MAX_ROTATION * rotationEnvelope;
-      sprite.scale.set(fromScale + (1 - fromScale) * eased);
+      sprite.scale.set(fromScale + (restScale - fromScale) * eased);
       if (t >= 1) {
         sprite.rotation = 0;
         dragShadow.clear();
@@ -429,7 +437,7 @@ function createDragController(
 
   function endDrag(event: FederatedPointerEvent): void {
     if (!dragging) return;
-    const { ref, sprite, homePoint, moved, cardId } = dragging;
+    const { ref, sprite, homePoint, moved, cardId, restScale } = dragging;
     dragging = null;
     app.stage.off('pointermove', onMove);
     if (!moved) {
@@ -438,7 +446,7 @@ function createDragController(
       dragShadow.clear();
       cardsLayer.addChild(sprite);
       sprite.position.set(homePoint.x, homePoint.y);
-      sprite.scale.set(1);
+      sprite.scale.set(restScale);
       return;
     }
     const target = hitTestDrop(toLocal(event));
@@ -454,7 +462,7 @@ function createDragController(
         dragLayer.removeChild(sprite); // the re-render already placed a fresh sprite in cardsLayer
       } else {
         justDraggedCardId = null;
-        shakeToHome(sprite, homePoint);
+        shakeToHome(sprite, homePoint, restScale);
       }
       return;
     }
@@ -463,8 +471,35 @@ function createDragController(
     dragShadow.clear();
     cardsLayer.addChild(sprite);
     sprite.position.set(homePoint.x, homePoint.y);
-    sprite.scale.set(1);
+    sprite.scale.set(restScale);
   }
+
+  // A browser can interrupt a gesture with 'pointercancel' instead of ever delivering
+  // 'pointerup'/'pointerupoutside' — releasing outside the window, a system gesture taking
+  // over, a tab/app switch mid-drag. Without this, `dragging` never clears: the lift ticker
+  // keeps easing to its full LIFT_SCALE and then just sits there (nothing else ever calls
+  // `app.ticker.remove` on it), and the sprite stays stuck at that size, orphaned in
+  // `dragLayer` on top of the normal board, since renderGameState only ever rebuilds
+  // `cardsLayer` — a real, reported "the card I drag gets stuck huge" bug. Always treat a
+  // cancel as an aborted gesture (snap back, no shake) regardless of pointer position; there
+  // is no reliable drop target to hit-test against a cancelled gesture.
+  //
+  // PixiJS's FederatedEventSystem only ever synthesizes a 'pointercancel' from a native
+  // *touch*cancel (see its TOUCH_TO_POINTER map) — it has no listener at all for the native
+  // browser 'pointercancel' event on a mouse/pen pointer, so `app.stage.on('pointercancel',
+  // ...)` would silently never fire for the mouse case this is actually guarding against.
+  // Listen on the real DOM canvas element directly instead, bypassing Pixi's event system.
+  function cancelDrag(): void {
+    if (!dragging) return;
+    const { sprite, homePoint, restScale } = dragging;
+    dragging = null;
+    app.stage.off('pointermove', onMove);
+    dragShadow.clear();
+    cardsLayer.addChild(sprite);
+    sprite.position.set(homePoint.x, homePoint.y);
+    sprite.scale.set(restScale);
+  }
+  app.canvas.addEventListener('pointercancel', cancelDrag);
 
   app.stage.eventMode = 'static';
   app.stage.hitArea = app.screen;
@@ -487,13 +522,16 @@ function createDragController(
       sprite.on('pointerdown', (event: FederatedPointerEvent) => {
         if (!canPickUp(ref)) return;
         dragLayer.addChild(sprite);
-        const session: DragState = { ref, sprite, homePoint, startLocal: toLocal(event), moved: false, cardId, liftOffset: 0 };
+        const restScale = sprite.scale.x;
+        const session: DragState = { ref, sprite, homePoint, startLocal: toLocal(event), moved: false, cardId, liftOffset: 0, restScale };
         dragging = session;
         app.stage.on('pointermove', onMove);
-        // DESIGN_RULES.md §7's pick-up "lift" — eases scale/rise in over LIFT_DURATION_MS.
-        // Ticker-driven (not just computed inline in onMove) so it completes even if the
-        // pointer holds still the whole time; guarded by object identity so a stale tick from
-        // an already-ended drag never touches a later one.
+        // DESIGN_RULES.md §7's pick-up "lift" — eases scale/rise in over LIFT_DURATION_MS,
+        // relative to the sprite's own restScale (see the DragState.restScale comment — a
+        // card's normal scale is well under 1, not 1 itself). Ticker-driven (not just
+        // computed inline in onMove) so it completes even if the pointer holds still the
+        // whole time; guarded by object identity so a stale tick from an already-ended drag
+        // never touches a later one.
         const start = performance.now();
         const tick = (): void => {
           if (dragging !== session) {
@@ -502,7 +540,7 @@ function createDragController(
           }
           const eased = easeOutCubic(Math.min(1, (performance.now() - start) / LIFT_DURATION_MS));
           session.liftOffset = LIFT_Y_OFFSET * eased;
-          sprite.scale.set(1 + (LIFT_SCALE - 1) * eased);
+          sprite.scale.set(restScale * (1 + (LIFT_SCALE - 1) * eased));
           if (eased >= 1) app.ticker.remove(tick);
         };
         app.ticker.add(tick);

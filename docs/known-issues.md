@@ -617,6 +617,46 @@ was made), even though the net effect over the full cycle is zero real progress.
 pursued further this pass** — flagged here as a known, much rarer (~5%, down from ~13%)
 residual, open to a future session if it's still worth chasing.
 
+## Fixed: dragged card rendered at ~1.8x size during lift/hold and the rejected-drop shake
+
+Direct user report: "when I select a card, the card gets super big." Reproduced and root-
+caused live (Playwright + a temporary `window.__scene` debug hook, not committed): every
+lift/shake scale mutation in `createDragController` (`src/render/pixi/scene.ts`) hardcoded
+`1` as a card sprite's "normal" scale — `sprite.scale.set(1 + (LIFT_SCALE - 1) * eased)` on
+pickup, interpolating toward `1` in both `shakeToHome` and the plain-tap/aborted-drop reset
+branches. But `createCardSprite` (`cardSprites.ts`) never sets `sprite.scale` directly — it
+sets `sprite.width/height = CARD_WIDTH/CARD_HEIGHT`, which Pixi achieves via a scale well
+under 1 (~0.568 at this app's default card size), since the vendored SVG art rasterizes at
+`SVG_RASTER_RESOLUTION`× native size for crispness. Hardcoding `1` as the rest state made a
+picked-up/held/dragged card balloon toward roughly its raw texture size — measured live at
+171×249px against a correct 96×139px (~1.8x too big) — for the entire lift, hold, and
+rejected-drop shake-back animation. Most visible during the shake: the oversized sprite
+oscillates back to home for the full `SHAKE_DURATION_MS`, then gets removed once it arrives,
+revealing the correctly-sized real card underneath (added by the immediate re-render a
+rejected move's reject-flash triggers) — so the bug was live and clearly visible for most of
+every rejected drop, not just a one-frame glitch.
+
+**Fixed**: `DragState` gained a `restScale` field, captured once at pickup
+(`const restScale = sprite.scale.x` before the lift starts) — the one place that actually
+knows the sprite's real rest scale. Every subsequent scale mutation (`attach`'s lift ticker,
+`shakeToHome`, and the two `endDrag` reset branches) now scales relative to `restScale`
+instead of hardcoding `1`. Verified live: mid-lift now measures 100.8×146px (a correct ~5%
+pop, `restScale * LIFT_SCALE`), and mid-shake stays near 96×139px throughout instead of
+spiking to 171×249px.
+
+Also hardened while investigating (a related but distinct gap found along the way, not the
+reported bug's actual cause): `app.stage`'s `'pointerup'`/`'pointerupoutside'` listeners are
+the only things that ever clear `dragging` — if a browser ever delivers `'pointercancel'`
+instead (releasing outside the window, a system gesture taking over, a tab/app switch
+mid-drag), `dragging` would never clear and the lift ticker would keep easing to its full
+`LIFT_SCALE` and then just sit there forever, stuck. PixiJS's `FederatedEventSystem` only
+ever synthesizes a `'pointercancel'` from a native *touch*cancel (see its `TOUCH_TO_POINTER`
+map in `EventSystem.js`) — it has no listener at all for the native browser `'pointercancel'`
+on a mouse/pen pointer, so `app.stage.on('pointercancel', ...)` would silently never fire for
+that case. Added a real DOM listener on `app.canvas` directly instead, bypassing Pixi's event
+system for this one case; confirmed via a synthetic `pointercancel` mid-drag that it now
+resets the sprite correctly.
+
 ## Known non-bug: rare simulate.ts "failure" on seed 885 with `--heuristic-human --heuristic-cpu`
 
 Same `MAX_MOVES_PER_GAME` cap, same ~1-in-5000 rarity, different mechanism, and **only
