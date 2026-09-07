@@ -267,14 +267,13 @@ anywhere in `scene.ts`, so new code stays conservative rather than assuming the 
 exception extends to it.
 
 **Deferred to a later round** (not built this pass, flagged so a future session doesn't
-have to re-derive scope from the handoff again): the landscape geometry constants
-(`LANDSCAPE_ROW_MARGIN = 24`, `HOUSE_FAN_ALLOWANCE = 286`) and the `pileLayout` (ROWS/
-SIDES) setting; Settings real content; drag-state polish; the drawn-card play/discard
-panel; the live CPU move-description indicator; and a `docs/tech-spec.md` §5 touch-up once
-the geometry constants land. The pulsing legal-target ring and dashed loadable-pile ring
-remain out of scope for the same architecture-rule reason as the first redesign round. (The
-"fan clamp" bug fix that used to be listed here was done in the very next phase — see the
-entry directly below.)
+have to re-derive scope from the handoff again): the `pileLayout` (ROWS/SIDES) setting;
+Settings real content; drag-state polish; the drawn-card play/discard panel; the live CPU
+move-description indicator; and a `docs/tech-spec.md` §5 touch-up once the `pileLayout`
+setting lands. The pulsing legal-target ring and dashed loadable-pile ring remain out of
+scope for the same architecture-rule reason as the first redesign round. (The "fan clamp"
+bug fix and the landscape geometry constants that used to be listed here were both done in
+later phases — see the two entries directly below.)
 
 ## Fixed: house fan had no width clamp — a long enough house ran over its neighbor
 
@@ -297,10 +296,36 @@ the old constant-peek overflow point) — the fan compresses and stays inside th
 instead of overlapping the reserve pile.
 
 Not done in this pass: `HOUSE_FAN_ALLOWANCE` itself is unchanged (still `6 ×
-HOUSE_OVERLAP_X`, i.e. 156) — the v2 handoff's larger landscape-only allowance (286, freed up
-by the `LANDSCAPE_ROW_MARGIN` change) is part of the still-deferred landscape geometry work
-above, not this fix. The clamp is correct either way; it just has less room to work with
-until that lands.
+HOUSE_OVERLAP_X`, i.e. 156) — the v2 handoff's larger landscape-only allowance (286) was
+delivered in the very next phase, see the entry directly below. The clamp is correct
+either way; it just had less room to work with until that landed.
+
+## Feature: landscape gets its own (smaller) edge margin and (much larger) house-fan allowance
+
+`DESIGN_RULES.md` §5's other landscape change, done separately from the toolbar itself:
+landscape's fit is height-bound (portrait's is width-bound), so at a typical laptop aspect
+ratio ~434 screen px of width sat unused while the card was squeezed by the shared,
+portrait-sized margins. Two new landscape-only constants in `layout.ts` —
+`LANDSCAPE_ROW_MARGIN = 24` (down from the shared `ROW_MARGIN`'s 60) and
+`LANDSCAPE_HOUSE_FAN_ALLOWANCE = 11 * HOUSE_OVERLAP_X = 286` (up from the shared
+`HOUSE_FAN_ALLOWANCE`'s 156) — spend the freed height on a taller card and the already-free
+width on fan room, at the same time, because they're paid for on different axes. Portrait is
+untouched: `ROW_MARGIN`/`HOUSE_FAN_ALLOWANCE`/`GRID_MARGIN` keep their original values and
+meaning, used only by `computePortraitLayout`.
+
+This required threading a `marginY` parameter through `rowY`/`houseColumn`/
+`foundationBlock`/`flankSlots` (previously hardcoded to the shared `ROW_MARGIN`), and
+splitting `houseFanPeek`'s single implicit `clear` constant into an explicit parameter — see
+the new `houseFanAllowance(mode)` in `layout.ts`, called from both `scene.ts` sites that call
+`houseFanPeek` so the fan clamp uses the right budget per mode. Verified live: at 1440×900
+landscape, cards are visibly larger than before this change, with portrait unaffected at any
+viewport (confirmed no shared geometry regressed).
+
+Not done in this pass: the `pileLayout` (ROWS/SIDES) setting itself — this only changes the
+*existing* landscape flank arrangement's constants, it doesn't add the alternate ROWS
+arrangement (`DESIGN_RULES.md` §5's "optional rows arrangement," a Settings-gated variant
+that reuses the portrait six-row graph verbatim at landscape's wider canvas). That, and the
+Settings screen needed to expose it, remain deferred (see the toolbar feature entry above).
 
 ## Rules question, confirmed not a rule: empty house doesn't force a waste-pile fill once reserve is empty
 

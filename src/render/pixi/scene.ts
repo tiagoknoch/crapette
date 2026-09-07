@@ -20,6 +20,7 @@ import {
   computeTableLayout,
   FOUNDATION_ROW_SUIT,
   HOUSE_FAN_SIGN,
+  houseFanAllowance,
   houseFanPeek,
   logicalSize,
   type PlayerRowLayout,
@@ -278,7 +279,7 @@ function effectiveSlotPoint(state: GameState, ref: PileRef, mode: TableMode): Po
   if (!base || ref.type !== 'house') return base;
   const count = state.players[ref.owner].houses[ref.index].length;
   const sign = HOUSE_FAN_SIGN[ref.owner];
-  return { x: base.x + Math.max(count - 1, 0) * sign * houseFanPeek(count), y: base.y };
+  return { x: base.x + Math.max(count - 1, 0) * sign * houseFanPeek(count, houseFanAllowance(mode)), y: base.y };
 }
 
 // Logical (root-local, pre-letterbox-scale) pixels of pointer movement before a pointerdown
@@ -1316,7 +1317,7 @@ function drawHouse(scene: TableScene, layer: Container, cards: Card[], point: Po
     return;
   }
   const sign = HOUSE_FAN_SIGN[owner];
-  const peek = houseFanPeek(cards.length);
+  const peek = houseFanPeek(cards.length, houseFanAllowance(scene.mode));
   let topSprite: Sprite | undefined;
   let topSpritePoint: Point | undefined;
   let topCardId: string | undefined;

@@ -32,14 +32,26 @@ export const HOUSE_OVERLAP_X = 26;
 export const TOOLBAR_HEIGHT = 56;
 
 // Gap from the true canvas edge — used for the talon/waste/reserve row's outer slots,
-// which don't fan and so don't need extra clearance.
+// which don't fan and so don't need extra clearance. Portrait-only past this point;
+// landscape has its own, smaller edge margin (see LANDSCAPE_ROW_MARGIN) since — unlike
+// portrait, which is bound by width — landscape has surplus width to spend once its own
+// edge margins shrink, per DESIGN_RULES.md §5.
 const ROW_MARGIN = 60;
 // How many extra fanned-out cards a house can grow by before its fan would run off the
 // edge of the canvas. Generous, not exact — a house deep enough to exceed this is a rare,
-// acceptable edge case (same caveat as the old vertical cascade had). Also reused, unchanged,
-// as the landscape arrangement's flank-to-middle-block clearance — a house's fan grows
-// toward that same gap in landscape mode too, so the room it needs doesn't change.
+// acceptable edge case (same caveat as the old vertical cascade had). Portrait-only past
+// this point — landscape budgets its own, much larger allowance instead (see
+// LANDSCAPE_HOUSE_FAN_ALLOWANCE), since portrait is width-bound and landscape isn't.
 const HOUSE_FAN_ALLOWANCE = 6 * HOUSE_OVERLAP_X;
+// DESIGN_RULES.md §5: landscape's fit is height-bound (unlike portrait's width-bound fit),
+// so ~434 screen px of width otherwise sits empty at a typical laptop aspect. Shrinking the
+// edge margin (60 → 24) and spending the freed width on house-fan room instead (156 → 286,
+// 11 × HOUSE_OVERLAP_X — a 12-card house before the fan clamp even has to compress) grows
+// both the card *and* the fan room at once, because they're paid for on different axes: the
+// margin shrink pays for the taller card (frees up height via LOGICAL_HEIGHT_LANDSCAPE), the
+// fan-allowance grow spends the width that was already free.
+const LANDSCAPE_ROW_MARGIN = 24;
+const LANDSCAPE_HOUSE_FAN_ALLOWANCE = 11 * HOUSE_OVERLAP_X;
 // DESIGN_RULES.md §6, "the fan clamp — implement this first": below this peek, rank/suit
 // stop being legible, so a house long enough to reach it stacks fully rather than shrinking
 // further (see houseFanPeek).
@@ -52,17 +64,18 @@ const HOUSE_FAN_PEEK_FLOOR = 0.1 * CARD_WIDTH;
 // house's fan against the real clear space instead: short houses still fan at the natural
 // peek (HOUSE_OVERLAP_X, the maximum), longer ones compress evenly rather than escaping, and
 // a house long enough to hit HOUSE_FAN_PEEK_FLOOR stops shrinking further — its true length
-// is left to the count badge instead. `clear` is HOUSE_FAN_ALLOWANCE, the same fixed gap
-// already budgeted between a house column and its nearest neighbor in both portrait and
-// landscape (see GRID_MARGIN / LANDSCAPE_MIDDLE_ORIGIN), so this needs no mode parameter.
-// Call this from every site that fans a house — there are three (the top-card point used for
-// click/flash resolution, the per-card render position, and the drag origin, all in
-// scene.ts) — so the card you see and the card you can grab never disagree.
-export function houseFanPeek(cardCount: number): number {
+// is left to the count badge instead. `clear` is the fixed gap already budgeted between a
+// house column and its nearest neighbor — see houseFanAllowance, since portrait and
+// landscape budget a different amount. Call this from every site that fans a house — there
+// are three (the top-card point used for click/flash resolution, the per-card render
+// position, and the drag origin, all in scene.ts) — so the card you see and the card you can
+// grab never disagree.
+export function houseFanPeek(cardCount: number, clear: number): number {
   if (cardCount <= 1) return HOUSE_OVERLAP_X;
-  const naturalPeek = HOUSE_FAN_ALLOWANCE / (cardCount - 1);
+  const naturalPeek = clear / (cardCount - 1);
   return Math.min(Math.max(naturalPeek, HOUSE_FAN_PEEK_FLOOR), HOUSE_OVERLAP_X);
 }
+
 // The house columns sit further in from the edge than the plain row margin, to leave that
 // fan-out room. Portrait-only — landscape's middle block is positioned relative to its own
 // flanks instead (see LANDSCAPE_MIDDLE_ORIGIN), not the canvas edge.
@@ -86,9 +99,16 @@ export const LOGICAL_HEIGHT = TOOLBAR_HEIGHT + 2 * ROW_MARGIN + TOTAL_ROWS * CAR
 
 // Landscape's middle block sits between the two flanks rather than at the canvas edge, so its
 // horizontal origin is derived from the flank width + clearance instead of GRID_MARGIN.
-const LANDSCAPE_MIDDLE_ORIGIN = ROW_MARGIN + CARD_WIDTH + HOUSE_FAN_ALLOWANCE;
-export const LOGICAL_WIDTH_LANDSCAPE = 2 * ROW_MARGIN + 2 * CARD_WIDTH + 2 * HOUSE_FAN_ALLOWANCE + MIDDLE_WIDTH;
-export const LOGICAL_HEIGHT_LANDSCAPE = TOOLBAR_HEIGHT + 2 * ROW_MARGIN + MIDDLE_HEIGHT;
+const LANDSCAPE_MIDDLE_ORIGIN = LANDSCAPE_ROW_MARGIN + CARD_WIDTH + LANDSCAPE_HOUSE_FAN_ALLOWANCE;
+export const LOGICAL_WIDTH_LANDSCAPE = 2 * LANDSCAPE_ROW_MARGIN + 2 * CARD_WIDTH + 2 * LANDSCAPE_HOUSE_FAN_ALLOWANCE + MIDDLE_WIDTH;
+export const LOGICAL_HEIGHT_LANDSCAPE = TOOLBAR_HEIGHT + 2 * LANDSCAPE_ROW_MARGIN + MIDDLE_HEIGHT;
+
+// The fixed gap between a house column and its nearest neighbor, budgeted by houseFanPeek —
+// landscape affords a much larger one than portrait since it has surplus width to spend
+// (see LANDSCAPE_HOUSE_FAN_ALLOWANCE's comment above).
+export function houseFanAllowance(mode: TableMode): number {
+  return mode === 'landscape' ? LANDSCAPE_HOUSE_FAN_ALLOWANCE : HOUSE_FAN_ALLOWANCE;
+}
 
 // +1 fans rightward (human, on the right column), -1 fans leftward (cpu, on the left
 // column) — always away from the foundations in between.
@@ -160,8 +180,11 @@ export function logicalSize(mode: TableMode): { width: number; height: number } 
     : { width: LOGICAL_WIDTH, height: LOGICAL_HEIGHT };
 }
 
-function rowY(rowIndex: number): number {
-  return TOOLBAR_HEIGHT + ROW_MARGIN + CARD_HEIGHT / 2 + rowIndex * (CARD_HEIGHT + ROW_GAP);
+// `marginY` is the vertical clear space above the topmost row — portrait always passes
+// ROW_MARGIN (60), landscape always passes LANDSCAPE_ROW_MARGIN (24, since landscape has no
+// pile row to clear above/below the middle block anymore, just this edge gap).
+function rowY(rowIndex: number, marginY: number): number {
+  return TOOLBAR_HEIGHT + marginY + CARD_HEIGHT / 2 + rowIndex * (CARD_HEIGHT + ROW_GAP);
 }
 
 // `origin` is the x-coordinate of the middle block's own left edge — portrait derives it
@@ -186,8 +209,8 @@ function pileRowSlots(y: number): { left: Point; center: Point; right: Point } {
 // vertically centered against the middle block's own height — the flank (3 cards, 2 gaps) is
 // shorter than the middle block (4 rows), so it sits centered within that span rather than
 // pinned to specific shared rows.
-function flankSlots(x: number): { top: Point; middle: Point; bottom: Point } {
-  const middleTop = rowY(0) - CARD_HEIGHT / 2;
+function flankSlots(x: number, marginY: number): { top: Point; middle: Point; bottom: Point } {
+  const middleTop = rowY(0, marginY) - CARD_HEIGHT / 2;
   const flankHeight = 3 * CARD_HEIGHT + 2 * ROW_GAP;
   const topOffset = (MIDDLE_HEIGHT - flankHeight) / 2;
   const firstCenterY = middleTop + topOffset + CARD_HEIGHT / 2;
@@ -201,16 +224,16 @@ function flankSlots(x: number): { top: Point; middle: Point; bottom: Point } {
 // `rowOffset` is which shared row index (0-based) the house column's first slot starts at —
 // portrait's middle block starts at row 1 (row 0 is the cpu pile row above it), landscape's
 // starts at row 0 (there's no pile row there anymore, piles moved to the flanks).
-function houseColumn(col: number, rowOffset: number, origin: number): [Point, Point, Point, Point] {
+function houseColumn(col: number, rowOffset: number, origin: number, marginY: number): [Point, Point, Point, Point] {
   const x = middleColumnX(col, origin);
-  return [0, 1, 2, 3].map((row) => ({ x, y: rowY(rowOffset + row) })) as [Point, Point, Point, Point];
+  return [0, 1, 2, 3].map((row) => ({ x, y: rowY(rowOffset + row, marginY) })) as [Point, Point, Point, Point];
 }
 
-function foundationBlock(rowOffset: number, origin: number): Point[] {
+function foundationBlock(rowOffset: number, origin: number, marginY: number): Point[] {
   const points: Point[] = [];
   for (let row = 0; row < MIDDLE_ROWS; row++) {
-    points.push({ x: middleColumnX(1, origin), y: rowY(rowOffset + row) });
-    points.push({ x: middleColumnX(2, origin), y: rowY(rowOffset + row) });
+    points.push({ x: middleColumnX(1, origin), y: rowY(rowOffset + row, marginY) });
+    points.push({ x: middleColumnX(2, origin), y: rowY(rowOffset + row, marginY) });
   }
   return points;
 }
@@ -221,27 +244,27 @@ function foundationBlock(rowOffset: number, origin: number): Point[] {
 // sits on the same side as their own reserve. Landscape keeps the exact same ordering, just
 // read top-to-bottom instead of left-to-right (see flankSlots).
 function computePortraitLayout(): TableLayout {
-  const cpuRow = pileRowSlots(rowY(0));
-  const humanRow = pileRowSlots(rowY(1 + MIDDLE_ROWS));
+  const cpuRow = pileRowSlots(rowY(0, ROW_MARGIN));
+  const humanRow = pileRowSlots(rowY(1 + MIDDLE_ROWS, ROW_MARGIN));
 
   return {
-    cpu: { reserve: cpuRow.left, waste: cpuRow.center, hand: cpuRow.right, houses: houseColumn(0, 1, GRID_MARGIN) },
-    human: { hand: humanRow.left, waste: humanRow.center, reserve: humanRow.right, houses: houseColumn(3, 1, GRID_MARGIN) },
-    foundations: foundationBlock(1, GRID_MARGIN),
+    cpu: { reserve: cpuRow.left, waste: cpuRow.center, hand: cpuRow.right, houses: houseColumn(0, 1, GRID_MARGIN, ROW_MARGIN) },
+    human: { hand: humanRow.left, waste: humanRow.center, reserve: humanRow.right, houses: houseColumn(3, 1, GRID_MARGIN, ROW_MARGIN) },
+    foundations: foundationBlock(1, GRID_MARGIN, ROW_MARGIN),
   };
 }
 
 function computeLandscapeLayout(): TableLayout {
-  const cpuX = ROW_MARGIN + CARD_WIDTH / 2;
-  const humanX = LOGICAL_WIDTH_LANDSCAPE - ROW_MARGIN - CARD_WIDTH / 2;
-  const cpuFlank = flankSlots(cpuX);
-  const humanFlank = flankSlots(humanX);
+  const cpuX = LANDSCAPE_ROW_MARGIN + CARD_WIDTH / 2;
+  const humanX = LOGICAL_WIDTH_LANDSCAPE - LANDSCAPE_ROW_MARGIN - CARD_WIDTH / 2;
+  const cpuFlank = flankSlots(cpuX, LANDSCAPE_ROW_MARGIN);
+  const humanFlank = flankSlots(humanX, LANDSCAPE_ROW_MARGIN);
   const origin = LANDSCAPE_MIDDLE_ORIGIN;
 
   return {
-    cpu: { reserve: cpuFlank.top, waste: cpuFlank.middle, hand: cpuFlank.bottom, houses: houseColumn(0, 0, origin) },
-    human: { hand: humanFlank.top, waste: humanFlank.middle, reserve: humanFlank.bottom, houses: houseColumn(3, 0, origin) },
-    foundations: foundationBlock(0, origin),
+    cpu: { reserve: cpuFlank.top, waste: cpuFlank.middle, hand: cpuFlank.bottom, houses: houseColumn(0, 0, origin, LANDSCAPE_ROW_MARGIN) },
+    human: { hand: humanFlank.top, waste: humanFlank.middle, reserve: humanFlank.bottom, houses: houseColumn(3, 0, origin, LANDSCAPE_ROW_MARGIN) },
+    foundations: foundationBlock(0, origin, LANDSCAPE_ROW_MARGIN),
   };
 }
 

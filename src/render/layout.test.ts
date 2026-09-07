@@ -6,6 +6,7 @@ import {
   computeTableLayout,
   FOUNDATION_ROW_SUIT,
   HOUSE_OVERLAP_X,
+  houseFanAllowance,
   houseFanPeek,
   TOOLBAR_HEIGHT,
 } from './layout.ts';
@@ -112,33 +113,44 @@ describe('computeTableLayout landscape branch', () => {
 });
 
 describe('houseFanPeek (DESIGN_RULES.md §6 fan clamp)', () => {
+  const PORTRAIT_CLEAR = houseFanAllowance('portrait'); // 6 * HOUSE_OVERLAP_X = 156
+
   it('uses the natural (maximum) peek for a house short enough to fan freely', () => {
-    expect(houseFanPeek(0)).toBe(HOUSE_OVERLAP_X);
-    expect(houseFanPeek(1)).toBe(HOUSE_OVERLAP_X);
-    // clear (6 * HOUSE_OVERLAP_X = 156) / (n - 1) still >= HOUSE_OVERLAP_X through n = 7.
-    expect(houseFanPeek(7)).toBe(HOUSE_OVERLAP_X);
+    expect(houseFanPeek(0, PORTRAIT_CLEAR)).toBe(HOUSE_OVERLAP_X);
+    expect(houseFanPeek(1, PORTRAIT_CLEAR)).toBe(HOUSE_OVERLAP_X);
+    // clear (156) / (n - 1) still >= HOUSE_OVERLAP_X through n = 7.
+    expect(houseFanPeek(7, PORTRAIT_CLEAR)).toBe(HOUSE_OVERLAP_X);
   });
 
   it('compresses evenly once the natural peek would exceed the clear space', () => {
-    const peek = houseFanPeek(8);
+    const peek = houseFanPeek(8, PORTRAIT_CLEAR);
     expect(peek).toBeLessThan(HOUSE_OVERLAP_X);
-    expect(peek).toBeCloseTo((6 * HOUSE_OVERLAP_X) / 7);
+    expect(peek).toBeCloseTo(PORTRAIT_CLEAR / 7);
   });
 
   it('never compresses below the legibility floor, however long the house grows', () => {
     const floor = 0.1 * CARD_WIDTH;
-    expect(houseFanPeek(18)).toBeCloseTo(floor);
-    expect(houseFanPeek(52)).toBeCloseTo(floor); // a near-worst-case house (most of a deck)
-    expect(houseFanPeek(52)).toBeGreaterThanOrEqual(floor - 1e-9);
+    expect(houseFanPeek(18, PORTRAIT_CLEAR)).toBeCloseTo(floor);
+    expect(houseFanPeek(52, PORTRAIT_CLEAR)).toBeCloseTo(floor); // near-worst-case (most of a deck)
+    expect(houseFanPeek(52, PORTRAIT_CLEAR)).toBeGreaterThanOrEqual(floor - 1e-9);
   });
 
   it('is monotonically non-increasing as a house grows — never gets peekier by adding a card', () => {
-    let previous = houseFanPeek(1);
+    let previous = houseFanPeek(1, PORTRAIT_CLEAR);
     for (let n = 2; n <= 40; n++) {
-      const peek = houseFanPeek(n);
+      const peek = houseFanPeek(n, PORTRAIT_CLEAR);
       expect(peek).toBeLessThanOrEqual(previous + 1e-9);
       previous = peek;
     }
+  });
+
+  it('landscape budgets a much larger clear space, so the same house count fans wider there', () => {
+    const landscapeClear = houseFanAllowance('landscape');
+    expect(landscapeClear).toBeGreaterThan(PORTRAIT_CLEAR);
+    // A 10-card house has already started compressing in portrait (10 - 1 = 9 > 156/26 = 6)
+    // but still fans at the natural maximum in landscape (9 <= 286/26 = 11).
+    expect(houseFanPeek(10, PORTRAIT_CLEAR)).toBeLessThan(HOUSE_OVERLAP_X);
+    expect(houseFanPeek(10, landscapeClear)).toBe(HOUSE_OVERLAP_X);
   });
 });
 
