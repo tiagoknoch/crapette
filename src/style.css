@@ -20,41 +20,11 @@ body {
   touch-action: none;
 }
 
-/* §5's simplest recommended v1 mobile handling, adjusted for the tableau geometry actually
-   built (see layout.ts's file comment — LOGICAL_WIDTH×LOGICAL_HEIGHT is 924×1104, taller
-   than wide, not the landscape band §5's text describes): the letterboxed scale on a phone
-   works out *bigger* in portrait than landscape (portrait: width-constrained, ~0.41 scale;
-   landscape: height-constrained, ~0.34 scale, with far more wasted pillarbox space) — so a
-   landscape *touch* device — `pointer: coarse` deliberately excludes a desktop window that
-   just happens to be wide — gets a "rotate your device" prompt instead of a needlessly
-   cramped table. Its text is set from src/main.ts (via i18next) rather than hardcoded here,
-   matching every other player-facing string in this app.
-   Direct user direction, deciding between two real options once the numbers were shown:
-   this canvas's own proportions favor portrait, so the prompt now asks for portrait rather
-   than trying to reshape the tableau to match the original landscape assumption instead. */
-#rotate-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 2rem;
-  background: #0f5132;
-  color: #fff;
-  font: 600 1.25rem/1.4 system-ui, sans-serif;
-}
-
-@media (orientation: landscape) and (pointer: coarse) {
-  #rotate-overlay {
-    display: flex;
-  }
-}
-
 /* §14 step 11/§10: shared plain-DOM modal look, reused by #resume-prompt (visibility toggled
-   from main.ts, JS-driven — unlike #rotate-overlay's CSS-media-query gating, this depends on
-   whether a save exists, not on viewport shape). Sits above the canvas the same way. */
+   from main.ts based on whether a save exists — landscape and portrait are both fully
+   supported now, see layout.ts's TableMode, so there's no viewport-shape gating here). Sits
+   above the canvas the same way. Recolored to match the redesign_handoff palette (felt/panel/
+   gold tokens — see scene.ts's color constants for the OKLCH->hex conversions this mirrors). */
 .modal-overlay {
   display: none;
   position: fixed;
@@ -63,7 +33,7 @@ body {
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.72);
-  font: 600 1rem/1.5 system-ui, sans-serif;
+  font: 500 1rem/1.5 Helvetica, Arial, sans-serif;
 }
 
 .modal-overlay.visible {
@@ -73,9 +43,10 @@ body {
 .modal-panel {
   max-width: 26rem;
   padding: 1.75rem 2rem;
-  border-radius: 12px;
-  background: #143a2b;
-  color: #fff;
+  border-radius: 14px;
+  background: #07180f;
+  border: 1px solid rgba(247, 244, 236, 0.16);
+  color: #f7f4ec;
   text-align: center;
 }
 
@@ -89,14 +60,26 @@ body {
 .modal-buttons button {
   padding: 0.6rem 1.2rem;
   border: none;
-  border-radius: 8px;
-  background: #2f8f5b;
-  color: #fff;
+  border-radius: 10px;
+  background: #d5b36a;
+  color: #221c10;
   font: inherit;
   font-weight: 700;
   cursor: pointer;
 }
 
 .modal-buttons button:hover {
-  background: #37a568;
+  background: #e2c284;
+}
+
+/* Secondary action (e.g. "New game" on the resume prompt) — outline, not filled, matching
+   the confirm/cancel pairing already used in scene.ts's Pixi-rendered modals. */
+#resume-prompt-new {
+  background: transparent;
+  border: 1px solid rgba(247, 244, 236, 0.3);
+  color: #f7f4ec;
+}
+
+#resume-prompt-new:hover {
+  background: rgba(247, 244, 236, 0.08);
 }

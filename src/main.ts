@@ -8,6 +8,7 @@ import {
   attemptDragMove,
   canPickUp,
   cpuStep,
+  getCompulsoryMove,
   getFlash,
   getSelected,
   getState,
@@ -56,8 +57,8 @@ function dealWithLoggedSeed(seed: number): GameState {
 }
 
 // §14 step 11/§10: "if a save exists and the game is in_progress, offer Resume vs New Game."
-// Plain DOM overlay (like #rotate-overlay) rather than a Pixi screen, since it needs to
-// resolve *before* the table scene (and its fixed-seed-or-saved starting GameState) exists.
+// A plain DOM overlay rather than a Pixi screen, since it needs to resolve *before* the
+// table scene (and its fixed-seed-or-saved starting GameState) exists.
 function promptResumeOrNew(saved: GameState): Promise<GameState> {
   return new Promise((resolve) => {
     const overlay = document.querySelector<HTMLDivElement>('#resume-prompt');
@@ -86,9 +87,6 @@ async function main(): Promise<void> {
   if (!container) throw new Error('#app container missing from index.html');
 
   await initI18n();
-
-  const rotateOverlay = document.querySelector<HTMLDivElement>('#rotate-overlay');
-  if (rotateOverlay) rotateOverlay.textContent = i18next.t('rotate.message');
 
   const saved = loadSavedGame();
   // No save at all (truly first-ever visit): fixed seed, for a reproducible dev session. A
@@ -123,8 +121,9 @@ async function main(): Promise<void> {
     onDrop: (from, to) => attemptDragMove(from, to),
     onNewGameRequest: () => newGame(),
     onLanguageChange: () => render(),
+    onModeChange: () => render(),
   });
-  render = (): void => renderGameState(scene, getState(), getSelected(), getFlash());
+  render = (): void => renderGameState(scene, getState(), getSelected(), getFlash(), getCompulsoryMove());
   subscribe(render);
   render();
 

@@ -39,8 +39,8 @@ const pt = {
     confirm: 'Começar novo jogo',
     cancel: 'Cancelar',
   },
-  rotate: {
-    message: 'Gire seu dispositivo para a vertical para jogar.',
+  board: {
+    emptyHouse: 'CASA VAZIA',
   },
   resume: {
     message: 'Você tem um jogo em andamento. Continuar ou começar um novo jogo?',

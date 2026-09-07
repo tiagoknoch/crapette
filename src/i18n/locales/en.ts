@@ -37,8 +37,8 @@ const en = {
     confirm: 'Start new game',
     cancel: 'Cancel',
   },
-  rotate: {
-    message: 'Please rotate your device to portrait to play.',
+  board: {
+    emptyHouse: 'EMPTY HOUSE',
   },
   resume: {
     message: 'You have a game in progress. Resume it, or start a new game?',

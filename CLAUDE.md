@@ -44,15 +44,12 @@ for.
 These are deliberate, direct-user-directed deviations; the spec doc's prose was never
 edited to match. Full rationale for each is in `docs/build-log.md`.
 
-- **Tableau layout** (§5): not the spec's 5-horizontal-band layout — see the comment
-  block at the top of `src/render/layout.ts` for the actual geometry (a mirrored 3-slot
-  row per player + a 4×4 middle grid), which matches Russian Bank's traditional physical
-  layout instead.
 - **Input** (§6): reactive-only, no legal-move highlighting or pre-disabling — every
   action is attempted, rejections get a red flash + reason banner. Drag-and-drop exists
-  alongside tap-to-select but follows the same no-hints philosophy.
-- **Mobile rotate prompt**: asks for portrait, not landscape — `layout.ts`'s actual
-  canvas (924×1104) is taller than wide, so portrait gives a bigger letterboxed scale.
+  alongside tap-to-select but follows the same no-hints philosophy. One narrow exception,
+  added with the redesign: a compulsory move's source gets a ring and every ineligible
+  pile dims — that's surfacing state the engine already gates clicks on, not a hint about
+  what to play, so it doesn't compromise the no-hints rule.
 - Foundations are visually grouped by suit (alternating black/red rows) but the engine
   still treats all 8 slots as interchangeable — display-only, see
   `computeFoundationDisplayOrder` in `layout.ts`.
@@ -60,17 +57,31 @@ edited to match. Full rationale for each is in `docs/build-log.md`.
 - Each player's two decks are shuffled/dealt independently (never one combined 104-card
   pool) — `docs/tech-spec.md` §2 itself was wrong here and has been corrected.
 
+(§5's tableau-layout and mobile-rotate-prompt deviations that used to live here are gone —
+the redesign pass rewrote §5 to describe the actual geometry, including the landscape
+flank arrangement, and deleted the rotate-to-continue prompt entirely now that both
+portrait and landscape are fully supported. See `docs/known-issues.md`.)
+
 ## Rules to not accidentally re-break
 
-- **Never put a click handler on a `Graphics` object in `scene.ts`.** In this codebase's
-  pixi.js version, `Graphics` buttons in modal/overlay layers reliably fail hit-testing —
-  confirmed via direct `EventBoundary` instrumentation, not guesswork. Put all
-  interactivity (`eventMode`, `cursor`, `.hitArea`, `pointertap`) on the button's `Text`
-  label instead, via `makeButtonHitTarget`. Full story: `docs/known-issues.md`.
+- **Never put a click handler on a `Graphics` object anywhere in `scene.ts`** — board
+  tiles included, not just modal/overlay layers as first diagnosed. In this codebase's
+  pixi.js version, an interactive `Graphics` reliably fails hit-testing; re-confirmed
+  during the redesign pass when a new interactive empty-foundation/empty-house `Graphics`
+  silently ate every click on a board tile, not just in a modal. Put all interactivity
+  (`eventMode`, `cursor`, `.hitArea`, `pointertap`) on a `Text` object instead (a real
+  label, or an empty dummy for a fully invisible hit zone), via `makeButtonHitTarget`.
+  Full story: `docs/known-issues.md`.
 - **Stalemate's `roundsWithoutProgress` threshold is dynamic** (`2 * max(humanCycleSize,
   cpuCycleSize)` in `winCheck.ts`'s `checkStalemate`), not a fixed count — a fixed
   threshold (the spec's original text) fires far too early. Full story:
   `docs/known-issues.md`.
+- **`layout.ts`'s `TableMode` (`'portrait'`/`'landscape'`) is chosen by aspect ratio**
+  (`chooseTableMode`, width ≥ height → landscape) and can change live on resize — `scene.ts`
+  rebuilds its mode-dependent static chrome (backdrop, slot outlines, footer/HUD
+  positions) whenever that happens, and fires `onModeChange` so `main.ts` re-renders
+  gameplay content too. A change here needs both halves kept in sync, not just
+  `computeTableLayout`'s geometry.
 - Card art is vendored from `htdebeer/SVG-cards` (LGPL-2.1) into `public/cards/` — see
   `public/cards/CREDIT.md` and the required in-app About/Legal credit (§12).
 - Every genuinely new deal logs `[crapette] seed: <n>` and persists it to

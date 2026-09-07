@@ -19,10 +19,22 @@ reliably **fails** hit-testing. Confirmed false for:
 
 A `Text` object in the exact same layer, same position, hit-tests correctly every time —
 verified both with auto text bounds and an explicit Rectangle `.hitArea`, against real
-(non-forced) geometry. The failure is specific to small button-sized `Graphics` siblings
-in this layer structure — it does NOT affect `Graphics` hit-testing in general (card
-sprites, `drawEmptyHitZone`'s invisible rects, and the modal backdrop/panel Graphics were
-all independently re-verified still working).
+(non-forced) geometry. At the time, the failure looked specific to small button-sized
+`Graphics` siblings in modal/overlay layers — card sprites, `drawEmptyHitZone`'s invisible
+rects, and the modal backdrop/panel Graphics were all re-verified still working, so the fix
+below was scoped to "modal buttons only."
+
+**Correction (redesign pass)**: that scoping was wrong. Building the redesign's new
+empty-foundation/empty-house visuals, a fresh interactive `Graphics` rect placed on a
+**board** tile (`cardsLayer`, not a modal layer) reproduced the exact same silent
+click-eating failure — confirmed via console logging (`gameStore.ts`'s click-routing log
+never fired for that tile) and cross-checked with the exact same screen coordinates
+computed independently from `layout.ts`. The rule below now applies to every `Graphics`
+object in `scene.ts`, board tiles included, not only modal buttons — `drawEmptyHitZone`
+itself was migrated to a Text-based hit target (an empty dummy `Text` sized to the full
+card box) for this reason. `drawEmptyHitZone`'s Graphics apparently "still working" in the
+original investigation was never actually exercised by an interactive click test, just
+assumed fine because nothing had reported it broken yet.
 
 Root cause inside Pixi's `EventBoundary` itself was not pinned down further — not worth
 it once a reliable alternative was confirmed.
@@ -176,6 +188,50 @@ Deliberately kept simple: the King renders face-down starting the very same rend
 completes the foundation (no separate "arrives face-up, then flips after settling"
 two-step animation) — a reasonable first cut for a cosmetic-only feature; revisit only if
 it actually looks abrupt in practice, not preemptively.
+
+## Feature: "Crapette Redesign" visual language + landscape layout
+
+A design handoff (`design_handoff_crapette_board/README.md` + `Crapette Redesign.dc.html`)
+specified a new visual language (felt gradient, Instrument Serif/IBM Plex Mono typography,
+gold/red accent palette, card shadows/rings) and a resolved responsive strategy: the table
+is always the portrait graph, a landscape viewport only rotates each player's talon/waste/
+reserve group into their own flank (see `docs/tech-spec.md` §5, now rewritten to match).
+Implemented as a visual + responsive-geometry pass on top of the existing interactions,
+per direct user scope decision — two things from the mockup were explicitly **not**
+built:
+
+- A Settings screen with a deck-art toggle (alternate type-only card faces) and a "rows"
+  table-view toggle — neither has any asset/layout work behind it yet; skipped rather than
+  building a whole second feature just to have a place to put an unused switch.
+- An explicit drawn-card play/discard panel and a live CPU move-description indicator —
+  both are genuine interaction changes (new UI, new state exposed from `gameStore.ts`)
+  beyond a restyle; the existing implicit click-your-own-waste-to-discard and static
+  turn-label interactions were kept as-is, just reskinned.
+
+Two more pieces from the mockup were skipped for a different reason — they contradict the
+locked-in "reactive-only, no legal-move highlighting" architecture rule (see CLAUDE.md):
+the pulsing "legal target" ring and the dashed "loadable pile" ring. Neither exists in this
+codebase and shouldn't be added without revisiting that rule first.
+
+Two visual details are deliberate approximations rather than pixel-perfect ports of the
+mockup's CSS: `box-shadow` under every card is a flat offset semi-transparent rounded-rect
+(`drawCardShadow` in `scene.ts`), not a real blur filter — pixi-filters isn't a dependency,
+and a GPU drop-shadow filter per card would cost a render pass per sprite with dozens of
+cards on screen at once, several animating simultaneously during a move/drag. The mockup's
+dashed empty-house border is a plain solid low-alpha stroke instead — Pixi's `Graphics` has
+no native dashed-stroke option, and hand-building one from short line segments wasn't
+judged worth it for a border this subtle.
+
+**One derived (not new) state addition**: a compulsory-move banner, ineligible-pile
+dimming, and a ring on the forced source. `gameStore.ts`'s `getCompulsoryMove()` exposes
+`getLegalMoves(state, 'human').compulsory` — already computed for click-gating rejections —
+to the renderer; nothing new is tracked, and it's only ever populated during the human's
+own turn (the CPU resolves its own forced moves automatically, see `cpuStep`).
+
+**Real bug caught and fixed during this pass**: see the correction note on the very first
+entry in this file — an interactive `Graphics` empty-foundation slot silently ate every
+click, which is what led to discovering the Graphics-hit-test-failure rule is broader than
+originally scoped.
 
 ## Rules question, confirmed not a rule: empty house doesn't force a waste-pile fill once reserve is empty
 

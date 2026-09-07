@@ -149,6 +149,17 @@ export function getFlash(): Flash | null {
   return flash;
 }
 
+// Redesign: exposes the human's own currently-pending compulsory move(s) (if any) so the
+// renderer can show a forced-move banner/ring/dimming — pure read of what getLegalMoves
+// already computes for click-gating (see attemptMove's reject path), not new game state.
+// Only meaningful during the human's own turn — the CPU resolves its forced moves
+// automatically (see cpuStep), so there's nothing for a person to act on otherwise.
+export function getCompulsoryMove(): Move[] | null {
+  if (state.status !== 'in_progress' || state.turn !== 'human') return null;
+  const compulsory = getLegalMoves(state, 'human').compulsory;
+  return compulsory.length > 0 ? compulsory : null;
+}
+
 export function subscribe(fn: () => void): void {
   listeners.push(fn);
 }

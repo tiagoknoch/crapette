@@ -176,20 +176,11 @@ Strict separation of concerns, so the rules engine is reusable server-side for v
 
 ## 5. Screen Layout
 
-The physical layout (players sitting across a table, houses in vertical columns) is rotated for a landscape browser window into horizontal rows, top to bottom:
+The table is always the same **portrait graph** (mirrors the physical two-player table, matching Russian Bank's traditional tableau — see Wikipedia's setup photo): foundations grouped as a 2×4 block dead centre, a house column flanking each side of it, and each player's talon/waste/reserve at their own edge. A landscape browser window does **not** re-flow this graph into horizontal rows — it only rotates each player's talon/waste/reserve group 90° as a unit, from a row above/below the middle block into that player's own outer flank (cpu's flank on the left, human's on the right, matching the fixed left/right sidedness `HOUSE_FAN_SIGN` already encodes). Every pile relationship, fan direction, and the shape of the 2×4 foundation block is identical between the two arrangements — only where the three per-player piles sit changes. This is implemented in `src/render/layout.ts`: `chooseTableMode(viewportWidth, viewportHeight)` picks `'portrait'` or `'landscape'` by simple aspect comparison (width ≥ height → landscape), and `computeTableLayout(mode)` returns the full set of pile coordinates for whichever mode is active — `scene.ts` re-derives this (and rebuilds the affected static chrome) whenever a resize crosses that threshold, so a desktop window resize or a tablet rotation reflows live, no reload needed.
 
-1. **CPU row**: hand (left) — waste pile — reserve (right, top card visible)
-2. **CPU houses**: 4 house slots in a horizontal row
-3. **Foundations**: 8 slots in a horizontal row (or 2×4 grid if width is tight), shared
-4. **Human houses**: 4 house slots in a horizontal row
-5. **Human row**: hand (left) — waste pile — reserve (right, top card visible)
+Both arrangements share one fixed logical canvas size *per mode* (924×1104 for portrait, a wider-than-tall size for landscape), letterbox-scaled to fit the real viewport via a uniform `Math.min(w/logicalWidth, h/logicalHeight)` factor — this is what keeps card size proportionate to whichever axis binds, without ever hardcoding a pixel card size for a specific breakpoint.
 
-This preserves every game-relevant relationship (CPU's houses and human's houses are both equally reachable/shared; foundations sit between them) while fitting a normal 16:9 canvas. Use a fixed logical resolution (e.g. 1280×800) scaled to fit the window via PixiJS `resizeTo` + a uniform scale factor (`Math.min(w/1280, h/800)`), letterboxing rather than distorting.
-
-**Mobile/responsive requirement:** this 5-row layout is landscape-shaped by nature (it mirrors the physical two-player table), so:
-- On a landscape viewport (including a phone rotated sideways) — render as above, scaled to fit.
-- On a portrait viewport — either (a) prompt the user to rotate the device (simplest, acceptable for v1), or (b) tighten the layout (smaller card size, houses/foundations wrapped into a denser grid rather than a single row) to fit a taller/narrower canvas. Recommendation for v1: do (a) with a simple "rotate your device" overlay below a width/height breakpoint (e.g. `height > width` on a touch device), and revisit (b) only if that proves too restrictive in practice.
-- Card and pile hit-targets must stay large enough for a fingertip (roughly 44×44 CSS px minimum) at the smallest supported scale — check this against the 1280×800 logical layout's card size when scaled down to a typical phone viewport (~375×667 landscape → 667×375).
+**Mobile/responsive requirement:** both the portrait and landscape arrangements are always available (there is no rotate-to-continue prompt) — a touch device in either orientation gets the corresponding table directly. Card and pile hit-targets must stay large enough for a fingertip (roughly 44×44 CSS px minimum) at the smallest supported scale; a sub-~400px-wide portrait viewport (e.g. a phone in portrait) falls under that minimum at the current fixed card unit size — a known, flagged-not-solved limitation, see `docs/known-issues.md`.
 
 ---
 

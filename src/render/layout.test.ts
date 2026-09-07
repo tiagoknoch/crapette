@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeFoundationDisplayOrder, FOUNDATION_ROW_SUIT } from './layout.ts';
+import { chooseTableMode, computeFoundationDisplayOrder, computeTableLayout, FOUNDATION_ROW_SUIT } from './layout.ts';
 import type { FoundationSlot } from '../engine/types.ts';
 
 function emptyFoundations(): FoundationSlot[] {
@@ -50,5 +50,54 @@ describe('computeFoundationDisplayOrder', () => {
     const spadeRow = order.slice(spadeRowIndex * 2, spadeRowIndex * 2 + 2);
     expect(spadeRow).toContain(0);
     expect(spadeRow.some((i) => i !== 0)).toBe(true);
+  });
+});
+
+describe('chooseTableMode', () => {
+  it('picks landscape when at least as wide as tall', () => {
+    expect(chooseTableMode(1440, 900)).toBe('landscape');
+    expect(chooseTableMode(1024, 1024)).toBe('landscape');
+  });
+
+  it('picks portrait when taller than wide', () => {
+    expect(chooseTableMode(1024, 1366)).toBe('portrait');
+    expect(chooseTableMode(390, 844)).toBe('portrait');
+  });
+});
+
+describe('computeTableLayout landscape branch', () => {
+  it('reuses the exact same middle block (houses + foundations) as portrait', () => {
+    const portrait = computeTableLayout('portrait');
+    const landscape = computeTableLayout('landscape');
+    // The middle block's internal shape (relative offsets between its own points) must be
+    // identical between modes — only its absolute position on the canvas may differ, since
+    // landscape's canvas origin for the middle block is derived from the flank width instead
+    // of the fixed portrait edge margin.
+    const relative = (points: { x: number; y: number }[]): { x: number; y: number }[] => {
+      const minX = Math.min(...points.map((p) => p.x));
+      const minY = Math.min(...points.map((p) => p.y));
+      return points.map((p) => ({ x: p.x - minX, y: p.y - minY }));
+    };
+    // Landscape's middle block starts at row 0 (no pile row above it); portrait's starts at
+    // row 1 (row 0 is the cpu pile row) — so absolute y differs by design, only the relative
+    // shape (spacing between rows/columns) needs to match exactly.
+    expect(relative(landscape.foundations)).toEqual(relative(portrait.foundations));
+    expect(relative(landscape.cpu.houses)).toEqual(relative(portrait.cpu.houses));
+    expect(relative(landscape.human.houses)).toEqual(relative(portrait.human.houses));
+  });
+
+  it('stacks each player\'s talon/waste/reserve vertically, cpu on the left, human on the right', () => {
+    const landscape = computeTableLayout('landscape');
+    expect(landscape.cpu.reserve.x).toBe(landscape.cpu.waste.x);
+    expect(landscape.cpu.waste.x).toBe(landscape.cpu.hand.x);
+    expect(landscape.human.hand.x).toBe(landscape.human.waste.x);
+    expect(landscape.human.waste.x).toBe(landscape.human.reserve.x);
+    expect(landscape.cpu.reserve.x).toBeLessThan(landscape.human.hand.x);
+    // Same left-to-right ordering as portrait (reserve—waste—talon for cpu, talon—waste—
+    // reserve for human), just read top-to-bottom instead.
+    expect(landscape.cpu.reserve.y).toBeLessThan(landscape.cpu.waste.y);
+    expect(landscape.cpu.waste.y).toBeLessThan(landscape.cpu.hand.y);
+    expect(landscape.human.hand.y).toBeLessThan(landscape.human.waste.y);
+    expect(landscape.human.waste.y).toBeLessThan(landscape.human.reserve.y);
   });
 });
