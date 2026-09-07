@@ -17,6 +17,14 @@ const en = {
     human: 'Your turn',
     cpu: "CPU's turn",
   },
+  cpu: {
+    draws: 'drawing a card',
+    playsToFoundation: 'playing {{card}} to a foundation',
+    playsToOwnHouse: 'playing {{card}} to its own house',
+    loadsHouse: 'loading {{card}} onto your house',
+    loadsReserve: 'loading {{card}} onto your reserve',
+    loadsWaste: 'loading {{card}} onto your waste',
+  },
   end: {
     youWon: 'You won!',
     cpuWon: 'CPU won!',

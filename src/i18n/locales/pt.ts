@@ -19,6 +19,14 @@ const pt = {
     human: 'Sua vez',
     cpu: 'Vez do CPU',
   },
+  cpu: {
+    draws: 'comprando uma carta',
+    playsToFoundation: 'jogando {{card}} numa fundação',
+    playsToOwnHouse: 'jogando {{card}} na própria casa',
+    loadsHouse: 'carregando {{card}} na sua casa',
+    loadsReserve: 'carregando {{card}} na sua reserva',
+    loadsWaste: 'carregando {{card}} no seu descarte',
+  },
   end: {
     youWon: 'Você venceu!',
     cpuWon: 'O CPU venceu!',

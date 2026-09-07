@@ -206,6 +206,17 @@ export interface TableScene {
   turnText: Text;
   bannerText: Text; // compulsory-move banner, shown only while a forced move is pending
   bannerPanel: Graphics; // red-wash background behind bannerText, sized to its measured bounds
+  // CPU turn indicator (README.md §5): a "CPU" chip + a live description of its current
+  // action + three pulsing "thinking" dots — visible only during the CPU's own turn,
+  // mutually exclusive with the compulsory-move banner above (that's human-only). The dots
+  // are redrawn every tick by a ticker callback registered once in createTableScene, gated
+  // on cpuActivityPanel.visible — see DESIGN_RULES.md §7, "loops are only for state that is
+  // waiting on the user or the CPU", which is exactly this case.
+  cpuActivityPanel: Graphics;
+  cpuChipBg: Graphics;
+  cpuChipText: Text;
+  cpuActivityText: Text;
+  cpuDots: Graphics;
   onSlotClick: SlotClickHandler;
   onPlayAgain: () => void;
   dragController: DragController;
@@ -563,6 +574,45 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
   bannerText.anchor.set(0.5, 0);
   root.addChild(bannerText);
 
+  // CPU turn indicator (README.md §5) — see the TableScene field comment for the pieces.
+  // All positioning happens in renderGameState (like feedbackPanel above), since it depends
+  // on the current description text's measured width, not just the current mode/width.
+  const cpuActivityPanel = new Graphics();
+  root.addChild(cpuActivityPanel);
+  const cpuChipBg = new Graphics();
+  root.addChild(cpuChipBg);
+  const cpuChipText = new Text({ text: 'CPU', style: { fill: INK_COLOR, fontFamily: FONT_MONO, fontSize: 11, fontWeight: '600', letterSpacing: 0.5 } });
+  cpuChipText.anchor.set(0.5);
+  cpuChipText.alpha = 0.85;
+  root.addChild(cpuChipText);
+  const cpuActivityText = new Text({ text: '', style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 13 } });
+  cpuActivityText.anchor.set(0, 0.5);
+  cpuActivityText.alpha = 0.85;
+  root.addChild(cpuActivityText);
+  const cpuDots = new Graphics();
+  root.addChild(cpuDots);
+
+  // DESIGN_RULES.md §7: "loops are only for state that is waiting on the user or the CPU" —
+  // this is exactly that case, so a continuous ticker callback (not a one-shot tween) is the
+  // sanctioned exception. Gated on cpuActivityPanel.visible, toggled each renderGameState
+  // call — costs nothing while it's the human's turn.
+  app.ticker.add(() => {
+    if (!cpuActivityPanel.visible) return;
+    const t = performance.now();
+    const period = 1200;
+    const stagger = 200;
+    const dotRadius = 2.5;
+    const dotGap = 9;
+    cpuDots.clear();
+    // Drawn in cpuDots' own local space — cpuDots.position (set once per render in
+    // renderGameState) is what actually places this trio in the scene.
+    for (let i = 0; i < 3; i++) {
+      const phase = (((t + i * stagger) % period) / period) * Math.PI * 2;
+      const alpha = 0.45 + 0.55 * ((Math.sin(phase) + 1) / 2);
+      cpuDots.circle(i * dotGap, 0, dotRadius).fill({ color: INK_COLOR, alpha });
+    }
+  });
+
   // Redesign v2 handoff (README.md §0): a full-width toolbar band pinned to the top of the
   // logical canvas, replacing the old bottom footer row. Pure presentation, no game-state
   // involvement, so it lives outside the gameStore/renderGameState pipeline; each entry
@@ -874,6 +924,11 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
     turnText,
     bannerText,
     bannerPanel,
+    cpuActivityPanel,
+    cpuChipBg,
+    cpuChipText,
+    cpuActivityText,
+    cpuDots,
     onSlotClick,
     onPlayAgain,
     dragController,
@@ -1379,7 +1434,36 @@ function turnLabel(state: GameState): string {
   return i18next.t(state.turn === 'human' ? 'turn.human' : 'turn.cpu');
 }
 
-export function renderGameState(scene: TableScene, state: GameState, selected: PileRef | null, flash: FeedbackFlash | null, compulsory: Move[] | null): void {
+// README.md §5's copy pattern ("CPU's turn — loading 9♥ onto your waste") minus the leading
+// "CPU's turn" clause — turnText above this row already says that, so this only needs the
+// action itself. Only a real move or a draw are ever visible here: a discard or a pass
+// always ends the CPU's turn in the same synchronous gameStore.cpuStep() call that set it,
+// so by the time this renders, state.turn has already flipped to 'human' and
+// getCpuActivity() has already gone back to null — see its comment in gameStore.ts.
+const CPU_RANK_LABEL: Record<number, string> = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
+
+function cpuCardGlyph(card: Card): string {
+  return `${CPU_RANK_LABEL[card.rank] ?? card.rank}${SUIT_GLYPH[card.suit]}`;
+}
+
+function describeCpuActivity(activity: Move | 'drawing'): string {
+  if (activity === 'drawing') return i18next.t('cpu.draws');
+  const card = cpuCardGlyph(activity.card);
+  const to = activity.to;
+  if (to.type === 'foundation') return i18next.t('cpu.playsToFoundation', { card });
+  if (to.type === 'house') return i18next.t(to.owner === 'cpu' ? 'cpu.playsToOwnHouse' : 'cpu.loadsHouse', { card });
+  if (to.type === 'reserve') return i18next.t('cpu.loadsReserve', { card });
+  return i18next.t('cpu.loadsWaste', { card }); // to.type === 'waste' — always the opponent's, loading a card in
+}
+
+export function renderGameState(
+  scene: TableScene,
+  state: GameState,
+  selected: PileRef | null,
+  flash: FeedbackFlash | null,
+  compulsory: Move[] | null,
+  cpuActivity: Move | 'drawing' | null,
+): void {
   scene.renderGeneration += 1;
   scene.dragController.setState(state);
   scene.dragController.setMode(scene.mode);
@@ -1431,6 +1515,40 @@ export function renderGameState(scene: TableScene, state: GameState, selected: P
       .roundRect(scene.bannerText.x - w / 2, scene.bannerText.y - paddingY, w, h, 12)
       .fill({ color: RED_WASH_COLOR, alpha: 0.16 })
       .stroke({ color: RED_COLOR, alpha: 0.5, width: 1 });
+  }
+
+  // CPU turn indicator (README.md §5) — same vertical slot as the compulsory-move banner
+  // above, mutually exclusive with it (that one's human-only, this one's cpu-only).
+  const cpuIndicatorActive = state.status === 'in_progress' && state.turn === 'cpu';
+  scene.cpuActivityPanel.visible = cpuIndicatorActive;
+  scene.cpuChipBg.visible = cpuIndicatorActive;
+  scene.cpuChipText.visible = cpuIndicatorActive;
+  scene.cpuActivityText.visible = cpuIndicatorActive;
+  scene.cpuDots.visible = cpuIndicatorActive;
+  if (cpuIndicatorActive) {
+    scene.cpuActivityText.text = cpuActivity ? describeCpuActivity(cpuActivity) : '';
+    const chipSize = 26;
+    const gap = 10;
+    const dotsWidth = 2 * 9 + 5; // matches the ticker's dotGap/dotRadius above
+    const hasText = scene.cpuActivityText.text.length > 0;
+    const contentWidth = chipSize + (hasText ? gap + scene.cpuActivityText.width + gap + dotsWidth : 0);
+    const rowHeight = Math.max(chipSize, scene.cpuActivityText.height) + 20;
+    const centerX = logicalSize(scene.mode).width / 2;
+    const left = centerX - contentWidth / 2;
+    const rowY = scene.bannerText.y - 6;
+
+    scene.cpuActivityPanel
+      .clear()
+      .roundRect(left - 15, rowY - rowHeight / 2, contentWidth + 30, rowHeight, 11)
+      .fill({ color: 0x000000, alpha: 0.22 });
+
+    scene.cpuChipBg.clear().roundRect(left, rowY - chipSize / 2, chipSize, chipSize, 8).fill({ color: INK_COLOR, alpha: 0.09 });
+    scene.cpuChipText.position.set(left + chipSize / 2, rowY);
+
+    if (hasText) {
+      scene.cpuActivityText.position.set(left + chipSize + gap, rowY);
+      scene.cpuDots.position.set(left + chipSize + gap + scene.cpuActivityText.width + gap, rowY);
+    }
   }
 
   scene.overlayLayer.removeChildren();

@@ -206,7 +206,9 @@ built:
 - An explicit drawn-card play/discard panel and a live CPU move-description indicator —
   both are genuine interaction changes (new UI, new state exposed from `gameStore.ts`)
   beyond a restyle; the existing implicit click-your-own-waste-to-discard and static
-  turn-label interactions were kept as-is, just reskinned.
+  turn-label interactions were kept as-is, just reskinned. (The CPU move-description
+  indicator was built in a later phase — see its own entry further down. The drawn-card
+  panel remains deferred.)
 
 Two more pieces from the mockup were skipped for a different reason — they contradict the
 locked-in "reactive-only, no legal-move highlighting" architecture rule (see CLAUDE.md):
@@ -268,12 +270,12 @@ exception extends to it.
 
 **Deferred to a later round** (not built this pass, flagged so a future session doesn't
 have to re-derive scope from the handoff again): the `pileLayout` (ROWS/SIDES) setting;
-Settings real content; drag-state polish; the drawn-card play/discard panel; the live CPU
-move-description indicator; and a `docs/tech-spec.md` §5 touch-up once the `pileLayout`
-setting lands. The pulsing legal-target ring and dashed loadable-pile ring remain out of
-scope for the same architecture-rule reason as the first redesign round. (The "fan clamp"
-bug fix and the landscape geometry constants that used to be listed here were both done in
-later phases — see the two entries directly below.)
+Settings real content; drag-state polish; the drawn-card play/discard panel; and a
+`docs/tech-spec.md` §5 touch-up once the `pileLayout` setting lands. The pulsing
+legal-target ring and dashed loadable-pile ring remain out of scope for the same
+architecture-rule reason as the first redesign round. (The "fan clamp" bug fix, the
+landscape geometry constants, and the live CPU move-description indicator that used to be
+listed here were all done in later phases — see the entries directly below.)
 
 ## Fixed: house fan had no width clamp — a long enough house ran over its neighbor
 
@@ -326,6 +328,37 @@ Not done in this pass: the `pileLayout` (ROWS/SIDES) setting itself — this onl
 arrangement (`DESIGN_RULES.md` §5's "optional rows arrangement," a Settings-gated variant
 that reuses the portrait six-row graph verbatim at landscape's wider canvas). That, and the
 Settings screen needed to expose it, remain deferred (see the toolbar feature entry above).
+
+## Feature: live CPU move-description indicator (redesign v2 handoff, README.md §5)
+
+Previously the CPU's turn showed only a static "CPU's turn" label — no indication of what
+it was actually doing move to move. Adds a row below that label, visible only during the
+CPU's own turn: a "CPU" chip, a live description ("drawing a card", "loading 9♥ onto your
+waste", "playing 9♥ to a foundation", ...), and three pulsing "thinking" dots, redrawn every
+tick by a ticker callback gated on the row's visibility (`DESIGN_RULES.md` §7 explicitly
+sanctions a continuous loop for exactly this case — "state waiting on the user or the CPU").
+
+`gameStore.ts` gained `getCpuActivity(): Move | 'drawing' | null` — deliberately not a new
+exported type, just the engine's own `Move` type plus a plain string literal, so `scene.ts`
+(which never imports from `state/gameStore.ts`, per `CLAUDE.md`'s architecture boundary)
+can still type-check against it structurally. Set at the same three `cpuStep()`/
+`resolveCpuDrawnCard()` branches that already log a move/draw to the console.
+
+**Only a real move or a draw are ever actually visible.** A discard or a pass always ends
+the CPU's turn in the same synchronous `cpuStep()` call that would have set the activity —
+by the time a render reads `getCpuActivity()`, `state.turn` has already flipped to
+`'human'` and the getter's own gate already returns `null`, regardless of what was last
+set. This was a deliberate simplification rather than a bug: the store fires one `notify()`
+per tick, not one per sub-step, so there was never a frame in which a person could actually
+see a "CPU discarding..." message before it stopped being true anyway.
+
+Verified live (localStorage-forced `turn: 'cpu'`, matching this file's established
+debugging pattern): the chip/description/dots row renders correctly for the "drawing a
+card" case in Portuguese, and disappears immediately once the turn flips back to the
+human. The move-description branches (foundation/own-house/opponent-house/reserve/waste)
+share the same rendering path and were verified via `tsc`/tests rather than caught live on
+screen — the 700ms CPU tick interval made reliably screenshotting one specific branch
+impractical, not a sign anything about that path is untested.
 
 ## Rules question, confirmed not a rule: empty house doesn't force a waste-pile fill once reserve is empty
 

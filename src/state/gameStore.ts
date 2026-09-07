@@ -128,12 +128,20 @@ let state: GameState;
 let selected: PileRef | null = null;
 let flash: Flash | null = null;
 let flashTimeout: ReturnType<typeof setTimeout> | undefined;
+// Redesign v2 handoff (README.md §5): the CPU turn indicator's live description of what the
+// CPU is currently doing — set at the same three cpuStep()/resolveCpuDrawnCard() branches
+// that already log a move/draw to the console, so it's read, not recomputed. Composed only
+// of engine types (Move) plus a plain string literal, deliberately not a new exported type —
+// the render layer (scene.ts) never imports from this module (see CLAUDE.md's architecture
+// rule), so this stays something it can already type-check structurally.
+let cpuActivity: Move | 'drawing' | null = null;
 const listeners: Array<() => void> = [];
 
 export function initGameStore(initialState: GameState): void {
   state = initialState;
   selected = null;
   flash = null;
+  cpuActivity = null;
   saveGame(state);
 }
 
@@ -158,6 +166,16 @@ export function getCompulsoryMove(): Move[] | null {
   if (state.status !== 'in_progress' || state.turn !== 'human') return null;
   const compulsory = getLegalMoves(state, 'human').compulsory;
   return compulsory.length > 0 ? compulsory : null;
+}
+
+// Redesign v2 handoff (README.md §5): what the CPU is currently doing, for the CPU turn
+// indicator's description text. Only meaningful during the CPU's own turn — a discard or a
+// pass always ends it in the same cpuStep() call that set cpuActivity, so by the time a
+// render reads this, state.turn has already flipped to 'human' and this already reads back
+// null regardless of cpuActivity's last-set value (the gate below, not a separate reset, is
+// what makes that true).
+export function getCpuActivity(): Move | 'drawing' | null {
+  return state.status === 'in_progress' && state.turn === 'cpu' ? cpuActivity : null;
 }
 
 export function subscribe(fn: () => void): void {
@@ -315,6 +333,7 @@ function resolveCpuDrawnCard(): void {
     return;
   }
 
+  cpuActivity = drawnMove;
   const previousStatus = state.status;
   log(`cpu plays ${cardLabel(drawnMove.card)}: ${pileLabel(drawnMove.from)} -> ${pileLabel(drawnMove.to)}`);
   state = checkStalemate(checkWin(applyMove(state, drawnMove), 'cpu'));
@@ -340,6 +359,7 @@ export function cpuStep(): void {
   const legal = getLegalMoves(state, 'cpu');
   const move = chooseMove(state, 'cpu', legal);
   if (move) {
+    cpuActivity = move;
     const previousStatus = state.status;
     log(`cpu plays ${cardLabel(move.card)}: ${pileLabel(move.from)} -> ${pileLabel(move.to)}`);
     state = checkStalemate(checkWin(applyMove(state, move), 'cpu'));
@@ -350,6 +370,7 @@ export function cpuStep(): void {
 
   if (canDrawHand(state, 'cpu')) {
     state = drawFromHand(state, 'cpu');
+    cpuActivity = 'drawing';
     const drawn = state.players.cpu.hand.at(-1);
     log(`cpu draws ${drawn ? cardLabel(drawn) : '?'}`);
     notify();

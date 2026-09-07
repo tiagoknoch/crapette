@@ -9,6 +9,7 @@ import {
   canPickUp,
   cpuStep,
   getCompulsoryMove,
+  getCpuActivity,
   getFlash,
   getSelected,
   getState,
@@ -124,7 +125,7 @@ async function main(): Promise<void> {
     onLanguageChange: () => render(),
     onModeChange: () => render(),
   });
-  render = (): void => renderGameState(scene, getState(), getSelected(), getFlash(), getCompulsoryMove());
+  render = (): void => renderGameState(scene, getState(), getSelected(), getFlash(), getCompulsoryMove(), getCpuActivity());
   subscribe(render);
   render();
 
