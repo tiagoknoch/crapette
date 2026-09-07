@@ -49,6 +49,10 @@ const en = {
     keepPlaying: 'Keep Playing',
   },
   settings: {
+    pileLayoutTitle: 'Pile layout',
+    pileLayoutSub: 'Your talon, waste and reserve at the sides, or above and below',
+    pileLayoutSides: 'SIDES',
+    pileLayoutRows: 'ROWS',
     aboutLegalTitle: 'About / Legal',
     aboutLegalSub: 'Card art, engine, licenses',
   },

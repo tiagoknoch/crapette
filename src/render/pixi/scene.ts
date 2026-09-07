@@ -592,6 +592,32 @@ function placeCard(scene: TableScene, sprite: Sprite, card: Card, owner: PlayerI
   animateCardTo(scene.app, sprite, previous.point, point);
 }
 
+// Redesign v2 handoff (README.md §5/§8): "the pile arrangement is a user setting, not a
+// breakpoint." ROWS reuses the portrait six-row graph **verbatim** ("no geometry changes" —
+// README.md's own words) even in a landscape-shaped viewport — so this needs no new layout
+// math at all, just deciding which of the two existing arrangements to use. `layout.ts`
+// itself can't hold this (persistence is a browser API, and that module stays
+// zero-DOM-imports pure, per CLAUDE.md's architecture rule) — it lives here, next to its
+// only consumer.
+type PileLayout = 'sides' | 'rows';
+const PILE_LAYOUT_KEY = 'crapette-pile-layout-v1';
+
+function loadPileLayout(): PileLayout {
+  try {
+    return localStorage.getItem(PILE_LAYOUT_KEY) === 'rows' ? 'rows' : 'sides';
+  } catch {
+    return 'sides'; // localStorage can throw (private browsing, disabled) — default, don't break
+  }
+}
+
+function savePileLayout(value: PileLayout): void {
+  try {
+    localStorage.setItem(PILE_LAYOUT_KEY, value);
+  } catch {
+    // persistence is a nice-to-have, never worth breaking the toggle itself over
+  }
+}
+
 // Approximates the design's `radial-gradient(105% 78% at 50% 50%, ...)` felt background —
 // Pixi's radial gradient is circular by default, `scale` elongates it to roughly match the
 // mockup's wider-than-tall ellipse for any canvas shape (portrait or landscape).
@@ -633,7 +659,15 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
   // right typography instead of flashing a fallback font on every player-facing label.
   await document.fonts.ready;
 
-  let mode: TableMode = chooseTableMode(app.screen.width, app.screen.height);
+  let pileLayout: PileLayout = loadPileLayout();
+  // ROWS forces the portrait geometry regardless of the viewport's own aspect ratio (see
+  // PileLayout's comment); SIDES is today's existing aspect-based choice. Either way, a
+  // narrow/tall viewport always gets the portrait arrangement — the setting only actually
+  // changes anything for a landscape-shaped viewport.
+  function resolveMode(): TableMode {
+    return pileLayout === 'rows' ? 'portrait' : chooseTableMode(app.screen.width, app.screen.height);
+  }
+  let mode: TableMode = resolveMode();
 
   const root = new Container();
   app.stage.addChild(root);
@@ -849,18 +883,24 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
     });
   });
 
-  const settingsButton = makeToolbarButton(i18next.t('toolbar.settings'), () => {
-    if (settingsPopoverLayer.visible) {
-      settingsPopoverLayer.visible = false;
-      return;
-    }
-    newGamePopoverLayer.visible = false;
+  // Extracted so the "Pile layout" toggle can redraw the popover in place after a change —
+  // its own value display, and possibly `mode`/logicalSize(mode) itself, need to reflect the
+  // new setting immediately without closing the popover.
+  function openSettingsPopover(): void {
     settingsPopoverLayer.visible = true;
     settingsPopoverLayer.removeChildren();
     drawSettingsPopover(
       settingsPopoverLayer,
       settingsButton.text.x,
       logicalSize(mode),
+      pileLayout,
+      (next) => {
+        if (next === pileLayout) return;
+        pileLayout = next;
+        savePileLayout(next);
+        syncMode();
+        openSettingsPopover();
+      },
       () => {
         settingsPopoverLayer.visible = false;
         openAboutLayer();
@@ -869,6 +909,15 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
         settingsPopoverLayer.visible = false;
       },
     );
+  }
+
+  const settingsButton = makeToolbarButton(i18next.t('toolbar.settings'), () => {
+    if (settingsPopoverLayer.visible) {
+      settingsPopoverLayer.visible = false;
+      return;
+    }
+    newGamePopoverLayer.visible = false;
+    openSettingsPopover();
   });
 
   const aboutButton = makeToolbarButton(i18next.t('toolbar.about'), () => {
@@ -1017,14 +1066,20 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
   // portrait/landscape aspect threshold (window resize, tablet rotation) — when it does, the
   // static chrome is rebuilt for the new mode and onModeChange asks main.ts for a fresh
   // renderGameState call so pile positions catch up too (see layoutChrome's comment).
-  app.renderer.on('resize', () => {
-    const nextMode = chooseTableMode(app.screen.width, app.screen.height);
+  // Shared by the resize handler below and the Settings "Pile layout" toggle — either can
+  // change which mode should be active; both need the exact same follow-through.
+  function syncMode(): void {
+    const nextMode = resolveMode();
     if (nextMode !== mode) {
       mode = nextMode;
       dragController.setMode(mode);
       layoutChrome();
       onModeChange();
     }
+  }
+
+  app.renderer.on('resize', () => {
+    syncMode();
     applyLetterbox();
   });
 
@@ -1326,29 +1381,94 @@ function drawNewGamePopover(layer: Container, anchorX: number, logical: { width:
 // Settings stub (per this round's scope decision — see the plan/known-issues.md): the only
 // row that has anything real behind it today is the About/Legal one, so that's the only row
 // built. Deck art / Table view / Pile layout stay out until those features actually exist.
-function drawSettingsPopover(layer: Container, anchorX: number, logical: { width: number; height: number }, onOpenAbout: () => void, onClose: () => void): void {
+// A small SIDES/ROWS-style segmented toggle for a single Settings row — deliberately a
+// separate, simpler helper from the toolbar's own EN/PT segmented control rather than a
+// shared abstraction: the toolbar's version has to survive repeated in-place layout passes
+// without stacking duplicate `pointertap` listeners (see makeToolbarButton's comment), while
+// this one is rebuilt from scratch every time its popover opens, so it has no such
+// constraint to design around.
+function drawSettingsToggle<T extends string>(layer: Container, rightEdge: number, centerY: number, options: [{ value: T; label: string }, { value: T; label: string }], active: T, onSelect: (value: T) => void): void {
+  const labelTexts = options.map(({ label }) => new Text({ text: label, style: { fill: INK_COLOR, fontFamily: FONT_MONO, fontSize: SEGMENTED_LABEL_FONT_SIZE, fontWeight: '500' } }));
+  const pillWidths = labelTexts.map((t) => t.width + SEGMENTED_LABEL_PAD_X * 2);
+  const trackWidth = SEGMENTED_PADDING * 2 + pillWidths[0] + SEGMENTED_LABEL_GAP + pillWidths[1];
+  const trackX = rightEdge - trackWidth;
+  const trackY = centerY - SEGMENTED_TRACK_HEIGHT / 2;
+  layer.addChild(new Graphics().roundRect(trackX, trackY, trackWidth, SEGMENTED_TRACK_HEIGHT, SEGMENTED_TRACK_HEIGHT / 2).fill({ color: INK_COLOR, alpha: SEGMENTED_TRACK_ALPHA }));
+
+  let pillX = trackX + SEGMENTED_PADDING;
+  options.forEach((opt, i) => {
+    const pillWidth = pillWidths[i];
+    const isActive = opt.value === active;
+    if (isActive) {
+      const pillHeight = SEGMENTED_TRACK_HEIGHT - SEGMENTED_PADDING * 2;
+      layer.addChild(new Graphics().roundRect(pillX, trackY + SEGMENTED_PADDING, pillWidth, pillHeight, pillHeight / 2).fill(GOLD_COLOR));
+    }
+    const text = labelTexts[i];
+    text.style.fill = isActive ? GOLD_LABEL_COLOR : INK_COLOR;
+    text.anchor.set(0.5);
+    text.position.set(pillX + pillWidth / 2, centerY);
+    makeButtonHitTarget(text, pillWidth, SEGMENTED_TRACK_HEIGHT, () => onSelect(opt.value));
+    layer.addChild(text);
+    pillX += pillWidth + SEGMENTED_LABEL_GAP;
+  });
+}
+
+function drawSettingsPopover(
+  layer: Container,
+  anchorX: number,
+  logical: { width: number; height: number },
+  pileLayout: PileLayout,
+  onChangePileLayout: (next: PileLayout) => void,
+  onOpenAbout: () => void,
+  onClose: () => void,
+): void {
   const width = SETTINGS_POPOVER_WIDTH;
   const x = popoverAnchorX(anchorX, width, logical.width);
   const y = TOOLBAR_HEIGHT + POPOVER_TOP_MARGIN;
   const rowHeight = 48;
-  const height = POPOVER_PADDING * 2 + rowHeight;
+  const height = POPOVER_PADDING * 2 + rowHeight * 2;
 
   drawInvisibleHitZone(layer, logical.width / 2, logical.height / 2, logical.width, logical.height, onClose);
   drawPopoverPanel(layer, x, y, width, height, INK_COLOR, HAIRLINE_ALPHA);
 
-  const rowCenterY = y + POPOVER_PADDING + rowHeight / 2;
+  // Row 1: Pile layout (README.md §5/§8) — SIDES/ROWS. Only visibly changes anything in a
+  // landscape-shaped viewport; see PileLayout's comment above for why ROWS needs no new
+  // geometry of its own.
+  const row1CenterY = y + POPOVER_PADDING + rowHeight / 2;
+  const row1Title = new Text({ text: i18next.t('settings.pileLayoutTitle'), style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 13.5 } });
+  row1Title.position.set(x + POPOVER_PADDING, row1CenterY - 15);
+  const row1Sub = new Text({ text: i18next.t('settings.pileLayoutSub'), style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 11 } });
+  row1Sub.alpha = 0.45;
+  row1Sub.position.set(x + POPOVER_PADDING, row1CenterY + 3);
+  layer.addChild(row1Title, row1Sub);
+  drawSettingsToggle(
+    layer,
+    x + width - POPOVER_PADDING,
+    row1CenterY,
+    [
+      { value: 'sides', label: i18next.t('settings.pileLayoutSides') },
+      { value: 'rows', label: i18next.t('settings.pileLayoutRows') },
+    ],
+    pileLayout,
+    onChangePileLayout,
+  );
+
+  layer.addChild(new Graphics().rect(x + POPOVER_PADDING, y + POPOVER_PADDING + rowHeight, width - POPOVER_PADDING * 2, 1).fill({ color: INK_COLOR, alpha: HAIRLINE_ALPHA }));
+
+  // Row 2: About / Legal (unchanged from before, just shifted down to make room for row 1).
+  const row2CenterY = row1CenterY + rowHeight;
   const titleText = new Text({ text: i18next.t('settings.aboutLegalTitle'), style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 13.5 } });
-  titleText.position.set(x + POPOVER_PADDING, rowCenterY - 15);
+  titleText.position.set(x + POPOVER_PADDING, row2CenterY - 15);
   const subText = new Text({ text: i18next.t('settings.aboutLegalSub'), style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 11 } });
   subText.alpha = 0.45;
-  subText.position.set(x + POPOVER_PADDING, rowCenterY + 3);
+  subText.position.set(x + POPOVER_PADDING, row2CenterY + 3);
   const disclosure = new Text({ text: '›', style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 18 } });
   disclosure.alpha = 0.45;
   disclosure.anchor.set(1, 0.5);
-  disclosure.position.set(x + width - POPOVER_PADDING, rowCenterY);
+  disclosure.position.set(x + width - POPOVER_PADDING, row2CenterY);
   layer.addChild(titleText, subText, disclosure);
 
-  drawInvisibleHitZone(layer, x + width / 2, rowCenterY, width - POPOVER_PADDING * 2, rowHeight, () => {
+  drawInvisibleHitZone(layer, x + width / 2, row2CenterY, width - POPOVER_PADDING * 2, rowHeight, () => {
     onClose();
     onOpenAbout();
   });

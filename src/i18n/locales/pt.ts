@@ -51,6 +51,10 @@ const pt = {
     keepPlaying: 'Continuar Jogando',
   },
   settings: {
+    pileLayoutTitle: 'Disposição das pilhas',
+    pileLayoutSub: 'Seu monte, descarte e reserva nas laterais, ou acima e abaixo',
+    pileLayoutSides: 'LADOS',
+    pileLayoutRows: 'LINHAS',
     aboutLegalTitle: 'Sobre / Legal',
     aboutLegalSub: 'Arte das cartas, motor, licenças',
   },

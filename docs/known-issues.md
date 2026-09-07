@@ -268,13 +268,17 @@ anywhere in `scene.ts`, so new code stays conservative rather than assuming the 
 exception extends to it.
 
 **Deferred to a later round** (not built this pass, flagged so a future session doesn't
-have to re-derive scope from the handoff again): the `pileLayout` (ROWS/SIDES) setting;
-Settings real content; and a `docs/tech-spec.md` §5 touch-up once the `pileLayout` setting
-lands. The pulsing legal-target ring and dashed loadable-pile ring remain out of scope for
-the same architecture-rule reason as the first redesign round. (The "fan clamp" bug fix,
-the landscape geometry constants, the live CPU move-description indicator, drag-state
-polish, and the drawn-card play/discard panel that used to be listed here were all done in
-later phases — see the entries directly below.)
+have to re-derive scope from the handoff again): the Deck art (CLASSIC/TYPE) and Table view
+(TABLE/ROWS) Settings rows — both are genuinely new features (a type-only card-face
+renderer; a third, five-row-wide table geometry), not incremental polish, matching the
+exact reasoning that already deferred them from the first redesign round. Only the "Pile
+layout" Settings row (ROWS/SIDES) was in scope for the item this note used to describe — see
+its own entry below, along with the `docs/tech-spec.md` §5 touch-up it enabled. The pulsing
+legal-target ring and dashed loadable-pile ring remain out of scope for the same
+architecture-rule reason as the first redesign round. (The "fan clamp" bug fix, the
+landscape geometry constants, the live CPU move-description indicator, drag-state polish,
+and the drawn-card play/discard panel that used to be listed here were all done in later
+phases — see the entries directly below.)
 
 ## Fixed: house fan had no width clamp — a long enough house ran over its neighbor
 
@@ -454,6 +458,46 @@ showed the panel with correct copy and card glyph; clicking **JOGAR** (PT for PL
 `human picks up J♦ from human.hand` and gave the card a gold selection border; clicking
 **DESCARTAR · FIM** afterward logged `human discards J♦ to waste (turn ends)` and the turn
 advanced — both buttons confirmed working end to end, not just type-checked.
+
+## Feature: "Pile layout" Settings row (SIDES/ROWS) and the real Settings screen it needed
+
+The redesign v2 handoff's `pileLayout` setting turned out to need far less code than the
+first redesign round assumed when it deferred the whole Settings screen: README.md §5 says
+ROWS "reuses the `layout.ts` six-row graph **verbatim** — no geometry changes." That's not
+an approximation, it's the literal implementation — ROWS just forces
+`computeTableLayout('portrait')` regardless of the viewport's own aspect ratio, instead of
+the existing aspect-based `chooseTableMode` choice (SIDES, the default). No third geometry,
+no new coordinates in `layout.ts` at all.
+
+Persisted to `localStorage` (`crapette-pile-layout-v1`, loaded/saved in `scene.ts` — not
+`layout.ts`, which stays zero-DOM-imports pure per `CLAUDE.md`'s architecture rule, so a
+browser API like `localStorage` has to live next to `layout.ts`'s only consumer instead).
+The Settings toolbar item — previously a stub with just an About/Legal disclosure row — now
+opens a real popover with a "Pile layout" row (a small dedicated `SIDES/ROWS` segmented
+toggle, deliberately a separate, simpler helper from the toolbar's own EN/PT segmented
+control rather than a shared abstraction, since this one is rebuilt from scratch every time
+its popover opens and has no duplicate-listener concern to design around) above the
+existing About/Legal row. Toggling it calls the same `syncMode()` the resize handler already
+uses to react to a mode change, and redraws the popover in place (not closing it) so the
+toggle's own new value is visible immediately.
+
+Deck art (CLASSIC/TYPE) and Table view (TABLE/ROWS) remain deferred — see the note on the
+toolbar feature entry above for why (both are genuinely new features, not incremental
+Settings-row additions).
+
+Verified live via Playwright at 1440×900 landscape: opened Settings, confirmed the new row's
+copy/toggle render correctly, clicked ROWS and watched the table re-flow live into the full
+six-row portrait graph (visibly smaller cards, cpu's piles now a row above the middle block
+instead of a left flank) with the popover staying open and its own toggle updating to match,
+then clicked SIDES and confirmed it reverts cleanly. No console errors either direction.
+**One real debugging detour, not a product bug:** an earlier landscape-geometry phase this
+session shifted the letterbox's vertical offset for a 1440×900 viewport from ~0 to ~36px;
+several toolbar clicks in this verification pass initially missed entirely because they
+reused a stale hardcoded y-coordinate from before that phase — recomputing the click
+position from `layout.ts`'s own exports (`TOOLBAR_HEIGHT`, `logicalSize`) instead of an
+eyeballed screenshot pixel resolved it. Worth remembering next time a toolbar click
+"mysteriously" does nothing at a viewport size that used to work: recompute the letterbox
+offset, don't assume the click mechanism itself broke.
 
 ## Rules question, confirmed not a rule: empty house doesn't force a waste-pile fill once reserve is empty
 
