@@ -206,9 +206,8 @@ built:
 - An explicit drawn-card play/discard panel and a live CPU move-description indicator —
   both are genuine interaction changes (new UI, new state exposed from `gameStore.ts`)
   beyond a restyle; the existing implicit click-your-own-waste-to-discard and static
-  turn-label interactions were kept as-is, just reskinned. (The CPU move-description
-  indicator was built in a later phase — see its own entry further down. The drawn-card
-  panel remains deferred.)
+  turn-label interactions were kept as-is, just reskinned. (Both were built in later phases
+  — see their own entries further down.)
 
 Two more pieces from the mockup were skipped for a different reason — they contradict the
 locked-in "reactive-only, no legal-move highlighting" architecture rule (see CLAUDE.md):
@@ -270,12 +269,12 @@ exception extends to it.
 
 **Deferred to a later round** (not built this pass, flagged so a future session doesn't
 have to re-derive scope from the handoff again): the `pileLayout` (ROWS/SIDES) setting;
-Settings real content; the drawn-card play/discard panel; and a `docs/tech-spec.md` §5
-touch-up once the `pileLayout` setting lands. The pulsing legal-target ring and dashed
-loadable-pile ring remain out of scope for the same architecture-rule reason as the first
-redesign round. (The "fan clamp" bug fix, the landscape geometry constants, the live CPU
-move-description indicator, and drag-state polish that used to be listed here were all done
-in later phases — see the entries directly below.)
+Settings real content; and a `docs/tech-spec.md` §5 touch-up once the `pileLayout` setting
+lands. The pulsing legal-target ring and dashed loadable-pile ring remain out of scope for
+the same architecture-rule reason as the first redesign round. (The "fan clamp" bug fix,
+the landscape geometry constants, the live CPU move-description indicator, drag-state
+polish, and the drawn-card play/discard panel that used to be listed here were all done in
+later phases — see the entries directly below.)
 
 ## Fixed: house fan had no width clamp — a long enough house ran over its neighbor
 
@@ -403,6 +402,58 @@ on a guaranteed-illegal target (a king onto an empty foundation) landed just aft
 ghost sprite, the card back at its unchanged home pile, and the console log showing
 `human drags K♥: human.reserve -> foundation[0]` followed immediately by the `rejected:`
 line, proving the reject path (and therefore the shake branch) actually fired.
+
+## Feature: drawn-card play/discard panel (redesign v2 handoff, README.md §4)
+
+Previously, a drawn card sitting face-up in the human's hand had no explicit UI at all —
+the player had to already know (from the rules) that tapping it selects it and tapping their
+own waste discards it. Adds a panel, shown only during the human's own turn while their
+drawn card sits face-up: a message plus two buttons, **DISCARD · END** (outline) and
+**PLAY IT** (filled gold) — reusing the exact same popover-panel/button building blocks
+(`drawPopoverPanel`/`drawPopoverButton`) already built for the New Game and Settings
+popovers, just centered in the shared top-HUD column instead of anchored under a toolbar
+button (nothing was clicked to trigger this one — it's driven by game state).
+
+**The mockup's own copy was not used verbatim.** README.md §4 quotes "2♣ *has one legal
+play*." — that discloses a legal-move *count* the player would otherwise have to discover
+by trying, which is a hint by this codebase's own standard (the same reasoning that already
+excluded the pulsing legal-target ring and dashed loadable-pile ring from the redesign).
+The panel's actual copy states only the rule that's already public knowledge from the How
+to Play modal ("if you don't play it, it goes to your waste and your turn ends"), naming
+the drawn card but never how many legal plays it has.
+
+**PLAY IT doesn't auto-resolve a move.** It calls a new `gameStore.ts` export,
+`selectDrawnCard()`, which selects the drawn card as the tap-flow's source — exactly as if
+the player had tapped it directly — so they still pick the actual destination afterward via
+the normal tap/drag flow, with normal reject feedback if they guess wrong. This was a
+deliberate design choice, not a shortcut: an engine-chosen destination would either have to
+guess among multiple legal targets or silently reveal that only one exists.
+
+**Why this needed two new gameStore exports instead of simulating two taps.** The obvious
+implementation — call the existing `onSlotClick` handler with the hand ref, then again with
+the waste ref, mirroring how a real two-tap discard works — breaks when some *other* pile is
+already selected: `canDrawHand` doesn't require the absence of other optional moves
+elsewhere (only compulsory ones), so a player can legitimately have an unrelated pile
+selected at the same moment their drawn card is sitting pending. Simulating the hand tap in
+that state would be read as "move the already-selected card onto the hand pile" (an
+always-illegal target), not "select the drawn card." `selectDrawnCard()`/
+`discardDrawnCard()` sidestep this entirely — both act directly on the drawn card
+regardless of whatever else might currently be selected.
+
+**Suppressed whenever the compulsory-move banner is showing.** A compulsory move always
+takes priority (the engine rejects anything else anyway), and the drawn card sitting in
+hand isn't necessarily the actual forced move — showing PLAY IT/DISCARD affordances for the
+wrong card would be misleading. This also conveniently means the panel and the banner never
+have to share the same shared-HUD vertical slot at once.
+
+Verified live (Playwright): a real card drawn via a hand-crafted `GameState` (constructing a
+fully-shaped one from scratch, `PlayerState.needsHandReshuffle`/`GameState.turnMoveLog` and
+all — an incomplete first attempt reusing a trimmed-down live save crashed
+`discardDrawnCardToWaste` on a missing field, a bug in the test fixture, not the feature)
+showed the panel with correct copy and card glyph; clicking **JOGAR** (PT for PLAY IT) logged
+`human picks up J♦ from human.hand` and gave the card a gold selection border; clicking
+**DESCARTAR · FIM** afterward logged `human discards J♦ to waste (turn ends)` and the turn
+advanced — both buttons confirmed working end to end, not just type-checked.
 
 ## Rules question, confirmed not a rule: empty house doesn't force a waste-pile fill once reserve is empty
 

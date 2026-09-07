@@ -52,6 +52,11 @@ const en = {
     aboutLegalTitle: 'About / Legal',
     aboutLegalSub: 'Card art, engine, licenses',
   },
+  drawnCard: {
+    message: 'You drew {{card}}. Play it, or discard it to your waste — discarding ends your turn.',
+    playIt: 'PLAY IT',
+    discardEnd: 'DISCARD · END',
+  },
   board: {
     emptyHouse: 'EMPTY HOUSE',
   },

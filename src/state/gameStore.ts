@@ -451,6 +451,38 @@ export function handleSlotClick(ref: PileRef): void {
   notify();
 }
 
+// Redesign v2 handoff (README.md §4): the drawn-card panel's two buttons — PLAY IT selects
+// the just-drawn card as the tap-flow's source, same as tapping it directly, so the player
+// still picks the actual destination afterward via the normal tap/drag flow (this never
+// bypasses legality or reveals whether a legal play exists, unlike the mockup's own copy
+// which states a legal-play count — see docs/known-issues.md for why that clause was
+// dropped). Deliberately overwrites `selected` unconditionally rather than replicating tap
+// semantics exactly: canDrawHand doesn't require the absence of other optional moves
+// elsewhere, so some unrelated pile could already be selected when the panel's button is
+// clicked, and "select this specific card" is the least surprising thing a dedicated button
+// about the drawn card can do in that edge case.
+export function selectDrawnCard(): void {
+  if (state.status !== 'in_progress' || state.turn !== 'human') return;
+  const ref: PileRef = { type: 'hand', owner: 'human' };
+  if (!isSelectableSource(ref, 'human')) return; // defensive — the panel shouldn't show otherwise
+  selected = ref;
+  const card = topCardOf(state, ref);
+  log(`human picks up ${card ? cardLabel(card) : '?'} from ${pileLabel(ref)}`);
+  notify();
+}
+
+// DISCARD · END — mirrors handleSlotClick's discard special-case (resolveMove), but callable
+// directly regardless of the current tap-selection state, same reasoning as
+// selectDrawnCard above.
+export function discardDrawnCard(): void {
+  if (state.status !== 'in_progress' || state.turn !== 'human') return;
+  const hand = state.players.human.hand;
+  if (hand.length === 0 || !hand[hand.length - 1].faceUp) return; // defensive
+  discardDrawn('human');
+  selected = null;
+  notify();
+}
+
 // §14 step 10.5 (drag-and-drop, added alongside tap-to-select rather than replacing it):
 // a pure read-only check scene.ts's drag controller calls on `pointerdown` to decide
 // whether to start tracking a drag gesture at all — never mutates state, so speculatively

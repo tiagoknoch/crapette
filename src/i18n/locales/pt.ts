@@ -54,6 +54,11 @@ const pt = {
     aboutLegalTitle: 'Sobre / Legal',
     aboutLegalSub: 'Arte das cartas, motor, licenças',
   },
+  drawnCard: {
+    message: 'Você comprou {{card}}. Jogue-a, ou descarte-a na sua pilha de descarte — descartar termina seu turno.',
+    playIt: 'JOGAR',
+    discardEnd: 'DESCARTAR · FIM',
+  },
   board: {
     emptyHouse: 'CASA VAZIA',
   },

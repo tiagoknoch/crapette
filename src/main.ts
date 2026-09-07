@@ -8,6 +8,7 @@ import {
   attemptDragMove,
   canPickUp,
   cpuStep,
+  discardDrawnCard,
   getCompulsoryMove,
   getCpuActivity,
   getFlash,
@@ -16,6 +17,7 @@ import {
   handleSlotClick,
   initGameStore,
   loadSavedGame,
+  selectDrawnCard,
   subscribe,
 } from './state/gameStore.ts';
 
@@ -124,6 +126,8 @@ async function main(): Promise<void> {
     isGameInProgress: () => getState().status === 'in_progress',
     onLanguageChange: () => render(),
     onModeChange: () => render(),
+    onSelectDrawnCard: () => selectDrawnCard(),
+    onDiscardDrawnCard: () => discardDrawnCard(),
   });
   render = (): void => renderGameState(scene, getState(), getSelected(), getFlash(), getCompulsoryMove(), getCpuActivity());
   subscribe(render);

@@ -200,6 +200,10 @@ export interface TableSceneHandlers {
   // GameState so cardsLayer/overlayLayer pick up the new pile positions too, same reasoning
   // as onLanguageChange.
   onModeChange: () => void;
+  // Redesign v2 handoff (README.md §4): the drawn-card panel's two buttons — see
+  // gameStore.ts's selectDrawnCard/discardDrawnCard for what each actually does.
+  onSelectDrawnCard: () => void;
+  onDiscardDrawnCard: () => void;
 }
 
 interface DragController {
@@ -238,6 +242,8 @@ export interface TableScene {
   cpuDots: Graphics;
   onSlotClick: SlotClickHandler;
   onPlayAgain: () => void;
+  onSelectDrawnCard: () => void;
+  onDiscardDrawnCard: () => void;
   dragController: DragController;
   // Which arrangement is currently active — portrait (piles in rows) or landscape (piles in
   // flanks). Read-only from the outside; only createTableScene's resize handler changes it.
@@ -606,7 +612,7 @@ function feltGradientFill(width: number, height: number): FillGradient {
 }
 
 export async function createTableScene(container: HTMLElement, handlers: TableSceneHandlers): Promise<TableScene> {
-  const { onSlotClick, onPlayAgain, canPickUp, onDrop, onNewGameRequest, isGameInProgress, onLanguageChange, onModeChange } = handlers;
+  const { onSlotClick, onPlayAgain, canPickUp, onDrop, onNewGameRequest, isGameInProgress, onLanguageChange, onModeChange, onSelectDrawnCard, onDiscardDrawnCard } = handlers;
   const app = new Application();
   // `resolution` defaults to 1 (CSS px per physical px) — on any high-DPI/retina screen that
   // renders the whole canvas at a lower density than the display, then lets the browser
@@ -1039,6 +1045,8 @@ export async function createTableScene(container: HTMLElement, handlers: TableSc
     cpuDots,
     onSlotClick,
     onPlayAgain,
+    onSelectDrawnCard,
+    onDiscardDrawnCard,
     dragController,
     get mode() {
       return mode;
@@ -1344,6 +1352,43 @@ function drawSettingsPopover(layer: Container, anchorX: number, logical: { width
     onClose();
     onOpenAbout();
   });
+}
+
+// Redesign v2 handoff (README.md §4): shown whenever the human's own drawn card sits face-up
+// in hand (renderGameState's caller gates this — see drawnCardPending there). Deliberately
+// centered in the shared top-HUD column (the same slot the compulsory banner/CPU indicator
+// use), not anchored under a toolbar button like the New Game/Settings popovers — it isn't
+// triggered by clicking anything, it's driven by game state, so there's no button to anchor
+// under. Never shown at the same time as the compulsory banner (see the caller): a
+// compulsory move always takes priority, and showing PLAY IT/DISCARD affordances for a card
+// that isn't the actual forced move would be actively misleading.
+function drawDrawnCardPanel(layer: Container, card: Card, logical: { width: number; height: number }, anchorY: number, onPlay: () => void, onDiscard: () => void): void {
+  const width = 380;
+  const x = logical.width / 2 - width / 2;
+  const y = anchorY - 6;
+
+  const messageText = new Text({
+    text: i18next.t('drawnCard.message', { card: cpuCardGlyph(card) }),
+    style: { fill: INK_COLOR, fontFamily: FONT_BODY, fontSize: 14, lineHeight: 20, wordWrap: true, wordWrapWidth: width - POPOVER_PADDING * 2, align: 'center' },
+  });
+  messageText.anchor.set(0.5, 0);
+  const buttonY = y + POPOVER_PADDING + messageText.height + 16 + POPOVER_BUTTON_HEIGHT / 2;
+  const height = POPOVER_PADDING * 2 + messageText.height + 16 + POPOVER_BUTTON_HEIGHT;
+
+  drawPopoverPanel(layer, x, y, width, height, GOLD_COLOR, 0.3);
+  messageText.position.set(logical.width / 2, y + POPOVER_PADDING);
+  layer.addChild(messageText);
+
+  const measure = (label: string, fontWeight: '500' | '600'): number =>
+    new Text({ text: label, style: { fontFamily: FONT_MONO, fontSize: 11, fontWeight, letterSpacing: 1.1 } }).width + POPOVER_BUTTON_PAD_X * 2;
+  const discardLabel = i18next.t('drawnCard.discardEnd');
+  const playLabel = i18next.t('drawnCard.playIt');
+  const discardWidth = measure(discardLabel, '500');
+  const playWidth = measure(playLabel, '600');
+  const totalWidth = discardWidth + POPOVER_BUTTON_GAP + playWidth;
+  const leftEdge = logical.width / 2 - totalWidth / 2;
+  drawPopoverButton(layer, leftEdge + discardWidth / 2, buttonY, discardLabel, false, onDiscard);
+  drawPopoverButton(layer, leftEdge + discardWidth + POPOVER_BUTTON_GAP + playWidth / 2, buttonY, playLabel, true, onPlay);
 }
 
 function endScreenTitle(state: GameState): string {
@@ -1659,8 +1704,17 @@ export function renderGameState(
     }
   }
 
+  // Redesign v2 handoff (README.md §4) — the drawn-card panel. Suppressed whenever the
+  // compulsory banner is active: a compulsory move always takes priority (the engine will
+  // reject anything else anyway), and showing PLAY IT/DISCARD affordances for a card that
+  // isn't the actual forced move would be misleading.
+  const drawnCard = state.status === 'in_progress' && state.turn === 'human' ? state.players.human.hand.at(-1) : undefined;
+  const drawnCardPending = !bannerActive && drawnCard !== undefined && drawnCard.faceUp;
+
   scene.overlayLayer.removeChildren();
   if (state.status !== 'in_progress') {
     drawEndScreen(scene.overlayLayer, state, scene.onPlayAgain, logicalSize(scene.mode));
+  } else if (drawnCardPending && drawnCard) {
+    drawDrawnCardPanel(scene.overlayLayer, drawnCard, logicalSize(scene.mode), scene.bannerText.y, scene.onSelectDrawnCard, scene.onDiscardDrawnCard);
   }
 }
