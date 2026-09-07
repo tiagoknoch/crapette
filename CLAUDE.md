@@ -42,30 +42,28 @@ elsewhere in the repo are safe to add, rename, or remove as the implementation i
 out; this isn't yet a stable public API with external callers to preserve compatibility
 for.
 
-## Handover — a real soft-lock, root-caused, awaiting a fix decision
+## Handover — simulate.ts's move-cap failures: root-caused and mostly fixed
 
-`npm run simulate`'s default random/random policy fails (hits `MAX_MOVES_PER_GAME`) on
-**~13% of games** (66/500) — see `docs/known-issues.md`'s entry (now marked RESOLVED for
-root cause, not yet fixed). This is **not a harness artifact and not a regression**: it's
-a genuine turn-never-ends soft-lock reachable by a real human or the heuristic CPU too, not
-just the random bot, and it has been present since the very first engine commit (the
-original "~1-in-5000" text was an anecdotal guess, never an actual measured rate — confirmed
-by re-running the pre-`7ddf4f7` dealing method, which fails at the same ~12% rate).
+`npm run simulate`'s default random/random policy used to fail (hit `MAX_MOVES_PER_GAME`)
+on ~13% of games (66/500) — a genuine turn-never-ends soft-lock reachable by a real human
+or the heuristic CPU too, not just the random bot (per `tech-spec.md` §8, a player should be
+able to stop taking optional moves and draw/pass instead, but neither `gameStore.ts`'s
+`settle()` nor `simulate.ts`'s bot loop implemented that "choose to stop" branch — both only
+ever ended a turn once **zero** legal moves remained). Present since the very first engine
+commit, not a regression from anything since — full mechanism and evidence in
+`docs/known-issues.md`.
 
-The mechanism: per `tech-spec.md` §8, a player should be able to choose to stop taking
-optional moves and either draw or pass — but neither `gameStore.ts`'s `settle()` nor
-`simulate.ts`'s random-bot loop implements that "choose to stop" branch; both only ever
-end a turn when **zero** legal moves remain. So if a player's hand+waste both empty out
-(nothing left to draw) while their reserve/houses still hold cards, and exactly one
-always-legal reversible move exists on the board (e.g. one card endlessly swapping between
-two houses), that player's turn literally never ends — the opponent never gets another turn,
-and `checkStalemate` never even runs (it only evaluates at turn boundaries this trap never
-reaches). Full trace/evidence in `docs/known-issues.md`.
+**Fixed** (per-turn state-signature cycle detection — `GameState.turnVisitedSignatures`,
+`src/engine/stateSignature.ts`, `engine.ts`'s new `getReachableLegalMoves`): an optional
+move that would only return the board to a state already visited earlier in the *same* turn
+is no longer treated as "something worth doing," so a player can fall through to draw/pass
+instead of looping on it forever. Cut the failure rate from 13.2% to **4.8%** (24/500).
 
-**Next step is a design decision, not further investigation**: give the player (human, CPU,
-and the harness) a real way to decline remaining optional moves and fall through to
-draw-or-pass, even while `optional.length > 0`. Needs the user's input on the intended UX
-before implementing — see `docs/known-issues.md`'s entry for the open questions.
+**Residual, not pursued further this pass**: the remaining ~5% is a *different*, already-
+documented mechanism — a macro-cycle spanning *multiple* turns (same family as the
+`--heuristic-human --heuristic-cpu` seed-885 entry), which a same-turn-only signature check
+structurally can't catch. `docs/known-issues.md` has the trace evidence (seed 124) if a
+future session wants to chase it further.
 
 ## Things that deviate from tech-spec.md — trust the code, not the spec text
 

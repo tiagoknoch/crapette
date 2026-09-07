@@ -10,7 +10,7 @@
 // automatic play (cpuPlayer.ts on a timer) isn't wired in yet — both seats are click-driven
 // for now, purely to make step 7's interaction testable end to end.
 import { chooseCompulsoryMove, chooseMove, chooseOptionalMove } from '../ai/cpuPlayer.ts';
-import { applyMove, discardDrawnCardToWaste, drawFromHand, passTurn, startTurn } from '../engine/engine.ts';
+import { applyMove, discardDrawnCardToWaste, drawFromHand, getReachableLegalMoves, passTurn, startTurn } from '../engine/engine.ts';
 import { canDrawHand, evaluateMove, getAvailableSources, getLegalMoves, hasEmptyHouse } from '../engine/moveResolver.ts';
 import type { Card, GameState, Move, PileRef, PlayerId, RejectReason } from '../engine/types.ts';
 import { checkStalemate, checkWin } from '../engine/winCheck.ts';
@@ -236,7 +236,12 @@ function performDiscard(mover: PlayerId): void {
 
 // Cascades forced consequences after any state-changing action, until reaching a point where
 // a human decision is genuinely required (or the game has ended):
-// - a compulsory or optional move exists -> stop and wait, the human picks one
+// - a compulsory move exists -> stop and wait, the human picks one
+// - a *reachable* optional move exists (i.e. not merely a cycle back to a state already
+//   seen this turn, per getReachableLegalMoves — see docs/known-issues.md's turn-never-ends
+//   soft-lock write-up) -> stop and wait, the human picks one. The human can still see and
+//   manually make a cycling move if they want to (it's still legal, just not one this gate
+//   waits around for); this only stops treating its mere existence as "something to do."
 // - a drawn hand card is sitting face-up -> stop and wait, *even if it has no legal move* —
 //   discarding it is always something the player does explicitly (click it, click own
 //   waste), per direct user direction: an automatic "can't play it, so it's silently
@@ -244,12 +249,12 @@ function performDiscard(mover: PlayerId): void {
 //   happened. This module has no opinion on the drawn card beyond that: whatever the human
 //   does with it next is on them.
 // - otherwise, if drawing is possible -> stop and wait, the human can choose to draw
-// - otherwise there is truly nothing this player can do at all (no drawn card sitting
-//   there either) -> pass automatically; there's nothing to click
+// - otherwise there is truly nothing worth doing this player can do at all (no drawn card
+//   sitting there either) -> pass automatically; there's nothing to click
 function settle(): void {
   while (state.status === 'in_progress') {
     const mover = state.turn;
-    const legal = getLegalMoves(state, mover);
+    const legal = getReachableLegalMoves(state, mover);
     if (legal.compulsory.length > 0 || legal.optional.length > 0) return;
 
     const hand = state.players[mover].hand;
@@ -361,7 +366,7 @@ export function cpuStep(): void {
     return;
   }
 
-  const legal = getLegalMoves(state, 'cpu');
+  const legal = getReachableLegalMoves(state, 'cpu');
   const move = chooseMove(state, 'cpu', legal);
   if (move) {
     cpuActivity = move;

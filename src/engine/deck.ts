@@ -81,5 +81,6 @@ export function deal(random: () => number = Math.random): GameState {
     turnMoveLog: [],
     status: 'in_progress',
     roundsWithoutProgress: 0,
+    turnVisitedSignatures: [],
   };
 }

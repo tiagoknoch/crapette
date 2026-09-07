@@ -1,4 +1,5 @@
-import { evaluateMove } from './moveResolver.ts';
+import { evaluateMove, getLegalMoves, type LegalMoves } from './moveResolver.ts';
+import { computeStateSignature } from './stateSignature.ts';
 import type { Card, GameState, Move, PlayerId, PlayerState } from './types.ts';
 
 function otherPlayer(player: PlayerId): PlayerId {
@@ -76,7 +77,32 @@ export function applyMove(state: GameState, move: Move): GameState {
   }
 
   next.turnMoveLog.push({ ...move, card });
+  next.turnVisitedSignatures = [...next.turnVisitedSignatures, computeStateSignature(next)];
   return next;
+}
+
+// A move that only returns the board to a state already visited earlier this same turn
+// isn't real progress — see docs/known-issues.md's turn-never-ends soft-lock write-up for
+// why this matters (a reversible optional move, like one card endlessly swapping between
+// two houses, has no other code path that ever stops it: a turn only ends via a discard or
+// a pass, and passing is only reachable once zero optional moves remain).
+function wouldCycle(state: GameState, move: Move): boolean {
+  const next = applyMove(state, move);
+  return state.turnVisitedSignatures.includes(computeStateSignature(next));
+}
+
+// Same shape as moveResolver.getLegalMoves, but with any optional move that would merely
+// cycle back to an already-visited state this turn filtered out. Compulsory moves are
+// never filtered (they only ever build onto a foundation, which never reverses, so they
+// can't cycle). Callers deciding "is there anything worth doing, or should this player
+// draw/pass instead" should use this instead of getLegalMoves directly; callers validating
+// or rendering an actual candidate move (evaluateMove, drag/tap legality, compulsory-move
+// highlighting) should keep using getLegalMoves as-is — a cycling move is still legal, a
+// player just isn't forced to keep taking it forever.
+export function getReachableLegalMoves(state: GameState, player: PlayerId): LegalMoves {
+  const legal = getLegalMoves(state, player);
+  if (legal.compulsory.length > 0) return legal;
+  return { compulsory: [], optional: legal.optional.filter((m) => !wouldCycle(state, m)) };
 }
 
 // The "voluntarily turn up hand's top card" action (§2/§8). Reshuffles waste into hand
@@ -147,6 +173,14 @@ export function startTurn(state: GameState): GameState {
   const player = next.players[next.turn];
   if (player.needsHandReshuffle) {
     next.players[next.turn] = reshuffleWasteIntoHand(player);
+  }
+  // Callers (gameStore.ts, simulate.ts) call this at the start of every single step, not
+  // just the first one of a turn — turnMoveLog is only ever empty at a genuine turn
+  // boundary (it resets in discardDrawnCardToWaste/passTurn), so that's the one reliable
+  // signal that this is a fresh turn needing a fresh visited-state list, not a repeated
+  // no-op call mid-turn that would otherwise wipe out cycle-detection history.
+  if (next.turnMoveLog.length === 0) {
+    next.turnVisitedSignatures = [computeStateSignature(next)];
   }
   return next;
 }

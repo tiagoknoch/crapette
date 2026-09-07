@@ -38,6 +38,7 @@ export interface GameState {
   winner?: PlayerId;
   scores?: Record<PlayerId, number>; // set once status !== 'in_progress'
   roundsWithoutProgress: number; // stalemate detection counter, see §9
+  turnVisitedSignatures: string[]; // board-state signatures seen so far this turn, see stateSignature.ts
 }
 
 export type PileRef =

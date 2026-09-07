@@ -580,17 +580,42 @@ show 0 failures at the real ~13% rate. Confirmed failing seeds for the current `
 259, 267, 269, 272, 278, 284, 288, 294, 333, 341, 358, 362, 372, 383, 385, 401, 413, 414,
 420, 425, 443, 446, 454, 463, 470, 473, 476, 482, 497, 498`.
 
-**Not fixed yet — needs a design decision, flagged to the user 2026-09-07**: the fix
-implied by §8's own pseudocode is to give the player (human, CPU, and the harness) a real
-"decline remaining optional moves, then draw if possible or otherwise pass" action reachable
-even while `optional.length > 0` — i.e. `settle()`/the harness's step function should be
-able to reach `passTurn` (or draw) once the player doesn't *want* any of the remaining
-optional moves, not only once none exist at all. This is an engine-behavior/rules change
-(what "the player chooses" means operationally), not a random-harness tweak, so don't
-implement it without confirming the intended UX first (e.g. does the human get an explicit
-"pass" affordance, or does `settle()` just auto-pass once every remaining optional move is
-a no-op cycle back to a previously-seen state — the latter needs a state-signature/visited-
-state check per turn, more engine machinery than the former).
+**Fixed 2026-09-07 (per-turn state-signature auto-pass, user's chosen option):** added
+`GameState.turnVisitedSignatures: string[]` and `src/engine/stateSignature.ts`'s
+`computeStateSignature(state)` (a card-id-based fingerprint of both players' reserve/houses/
+hand/waste plus the foundations). `engine.ts`'s `startTurn` seeds this list with the
+turn's opening signature (only when `turnMoveLog` is empty — callers invoke `startTurn` on
+every single step, not just the first one of a turn, so this is the one reliable "this is
+genuinely a fresh turn" signal); `applyMove` appends the resulting signature after every
+move. A new `getReachableLegalMoves(state, player)` returns the same shape as
+`moveResolver.getLegalMoves` but with any optional move filtered out if applying it would
+reproduce a signature already in `turnVisitedSignatures` — i.e. a move that only cycles
+back to a state this turn has already visited isn't real progress, so it's no longer
+treated as "something worth doing." Compulsory moves are never filtered (they only ever
+build onto a foundation, which never reverses, so they can't cycle by construction).
+`gameStore.ts`'s `settle()` and `cpuStep()`, and `simulate.ts`'s `playRandomStep`/
+`playHeuristicStep`, all switched from `getLegalMoves` to `getReachableLegalMoves` for the
+"is there anything worth doing, or should this player draw/pass instead" decision —
+`evaluateMove`/drag-and-drop legality checks were deliberately left alone, so a human can
+still manually make a cycling move if they want to (it's still legal, just no longer
+something the engine waits around for). Regression coverage: `engine.test.ts`'s
+`getReachableLegalMoves` describe block constructs the exact seed-1-style two-house swap
+and asserts the reverse move is filtered out after the first swap is taken once.
+
+**Result — a large reduction, not full closure:** re-ran `--games 500` after the fix:
+**24/500 failures (4.8%)**, down from 66/500 (13.2%) — a ~64% cut. Traced one remaining
+failure (seed 124) directly: `turnEndCount` was climbing steadily (turns *are* ending
+normally, unlike the seed-1 case), but `human.reserve` sat fixed at 10 and `cpu.reserve` at
+0 for 1000+ moves while hand/waste/house counts oscillated in a small repeating band — this
+is a **different, already-documented mechanism**: a macro-cycle spanning *multiple* turns,
+same family as the "`--heuristic-human --heuristic-cpu` seed 885" entry below, just now also
+reachable under plain random/random play. `turnVisitedSignatures` resets every turn boundary
+by design (per the user's chosen scope: "a state already seen **this turn**"), so it
+structurally cannot catch a cycle that spans several turns — `roundsWithoutProgress` doesn't
+catch it either, since each individual turn in the cycle still counts as "progress" (a move
+was made), even though the net effect over the full cycle is zero real progress. **Not
+pursued further this pass** — flagged here as a known, much rarer (~5%, down from ~13%)
+residual, open to a future session if it's still worth chasing.
 
 ## Known non-bug: rare simulate.ts "failure" on seed 885 with `--heuristic-human --heuristic-cpu`
 

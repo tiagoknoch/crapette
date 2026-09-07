@@ -18,6 +18,7 @@ function baseState(): GameState {
     turnMoveLog: [],
     status: 'in_progress',
     roundsWithoutProgress: 0,
+    turnVisitedSignatures: [],
   };
 }
 

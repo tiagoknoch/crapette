@@ -4,7 +4,7 @@
 // process/console usage here is fine.
 import { chooseCompulsoryMove, chooseMove, chooseOptionalMove } from '../ai/cpuPlayer.ts';
 import { deal } from '../engine/deck.ts';
-import { applyMove, discardDrawnCardToWaste, drawFromHand, passTurn, startTurn } from '../engine/engine.ts';
+import { applyMove, discardDrawnCardToWaste, drawFromHand, getReachableLegalMoves, passTurn, startTurn } from '../engine/engine.ts';
 import { canDrawHand, getLegalMoves } from '../engine/moveResolver.ts';
 import type { Card, GameState, PlayerId } from '../engine/types.ts';
 import { checkStalemate, checkWin } from '../engine/winCheck.ts';
@@ -61,7 +61,7 @@ function assertInvariants(state: GameState): void {
 // optional move or a draw, chosen with just enough bias to make reasonable progress
 // without needing any game-playing intelligence (that's cpuPlayer.ts's job).
 function playRandomStep(state: GameState, player: PlayerId, rng: () => number): GameState {
-  const { compulsory, optional } = getLegalMoves(state, player);
+  const { compulsory, optional } = getReachableLegalMoves(state, player);
   if (compulsory.length > 0) {
     state = applyMove(state, pickRandom(compulsory, rng));
     return checkStalemate(checkWin(state, player));
@@ -98,7 +98,7 @@ function playRandomStep(state: GameState, player: PlayerId, rng: () => number): 
 // if one exists; only draw once none remain (which, per chooseMove, can also happen with
 // optional moves still on the table if none of them are worth taking — see cpuPlayer.ts).
 function playHeuristicStep(state: GameState, player: PlayerId): GameState {
-  const legal = getLegalMoves(state, player);
+  const legal = getReachableLegalMoves(state, player);
   const move = chooseMove(state, player, legal);
   if (move) {
     state = applyMove(state, move);

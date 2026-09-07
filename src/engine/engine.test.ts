@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyMove, discardDrawnCardToWaste, drawFromHand, passTurn, startTurn } from './engine.ts';
+import { applyMove, discardDrawnCardToWaste, drawFromHand, getReachableLegalMoves, passTurn, startTurn } from './engine.ts';
 import type { Card, GameState, PlayerId, PlayerState } from './types.ts';
 
 function card(suit: Card['suit'], rank: Card['rank'], faceUp = true, tag = ''): Card {
@@ -18,6 +18,7 @@ function emptyState(turn: PlayerId = 'human'): GameState {
     turnMoveLog: [],
     status: 'in_progress',
     roundsWithoutProgress: 0,
+    turnVisitedSignatures: [],
   };
 }
 
@@ -253,5 +254,47 @@ describe('reshuffle timing rule end-to-end (resolution #2)', () => {
     expect(state.players.human.waste).toHaveLength(0); // reshuffled immediately, not deferred
     expect(state.players.human.hand.map((c) => c.id)).toEqual([card('D', 7).id]);
     expect(state.players.human.hand[0].faceUp).toBe(true);
+  });
+});
+
+// Regression coverage for docs/known-issues.md's turn-never-ends soft-lock: a reversible
+// house<->house swap has no other code path that ever stops it (a turn only ends via a
+// discard or a pass, and passing is only reachable once zero optional moves remain), so
+// simulate.ts's random bot (and a real human/CPU facing the same board) could otherwise
+// loop on it forever.
+describe('getReachableLegalMoves', () => {
+  it('filters out an optional move that would only cycle back to a state already visited this turn', () => {
+    let state = emptyState('human');
+    state.players.human.houses[0] = [card('S', 10, true, 'a')]; // black 10
+    state.players.human.houses[1] = [card('H', 9, true)]; // red 9 — legally swaps onto the black 10 and back
+    state = startTurn(state); // records the starting arrangement as this turn's first visited state
+
+    const isHumanHouse = (m: (typeof state)['turnMoveLog'][number], index: 0 | 1) =>
+      m.card.id === 'H9' && m.to.type === 'house' && m.to.owner === 'human' && m.to.index === index;
+
+    const beforeSwap = getReachableLegalMoves(state, 'human').optional;
+    const toHouse0 = beforeSwap.find((m) => isHumanHouse(m, 0));
+    expect(toHouse0).toBeDefined(); // first time through, not yet a repeat — still allowed
+
+    state = applyMove(state, toHouse0!);
+    expect(state.players.human.houses[0].map((c) => c.id)).toEqual(['S10a', 'H9']);
+    expect(state.players.human.houses[1]).toEqual([]);
+
+    // The only cycling optional move is H9 back onto its own now-empty house[1], which would
+    // exactly reproduce the turn-start arrangement — must be filtered out. (H9 could also
+    // legally move onto cpu's own empty house[1] instead; that's a genuinely new state, not a
+    // repeat, so it correctly stays available — this asserts only the specific cycling move.)
+    const afterSwap = getReachableLegalMoves(state, 'human').optional;
+    const backToHouse1 = afterSwap.find((m) => isHumanHouse(m, 1));
+    expect(backToHouse1).toBeUndefined();
+  });
+
+  it('leaves compulsory moves untouched regardless of cycling', () => {
+    let state = emptyState('human');
+    state.players.human.reserve = [card('S', 1, true)]; // Ace, always plays to an empty foundation
+    state = startTurn(state);
+    const legal = getReachableLegalMoves(state, 'human');
+    expect(legal.compulsory).toHaveLength(8); // one legal foundation move per empty slot
+    expect(legal.optional).toEqual([]);
   });
 });
