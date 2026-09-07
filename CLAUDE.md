@@ -42,20 +42,30 @@ elsewhere in the repo are safe to add, rename, or remove as the implementation i
 out; this isn't yet a stable public API with external callers to preserve compatibility
 for.
 
-## Handover — open investigation for the next session
+## Handover — a real soft-lock, root-caused, awaiting a fix decision
 
-While wrapping up the "Crapette Redesign" v2 work below, a routine `npm run simulate`
-sanity check turned up something that needs a real look: **the default random/random
-policy fails (hits `MAX_MOVES_PER_GAME`) on ~13% of games** (66/500 in a full run — see
-`docs/known-issues.md`'s entry, formerly titled "Known non-bug: rare simulate.ts 'failure'
-on seed 3925", now marked OPEN), not the ~1-in-5000 that entry used to claim. Confirmed
-this is not a regression from the redesign commits (`git log <redesign-range> --
-src/engine src/ai src/cli` returns nothing) — it was already true of the engine, just not
-re-measured recently. `docs/known-issues.md` has the exact reproducible seed list and a
-concrete next-step (re-run the seed-3925 investigation's state-signature-logging technique
-against the newly-listed failing seeds, e.g. seed 1, and check whether recent `deck.ts`/
-`winCheck.ts` changes visible in `git log` shifted the odds). Start there before doing
-anything else engine-related.
+`npm run simulate`'s default random/random policy fails (hits `MAX_MOVES_PER_GAME`) on
+**~13% of games** (66/500) — see `docs/known-issues.md`'s entry (now marked RESOLVED for
+root cause, not yet fixed). This is **not a harness artifact and not a regression**: it's
+a genuine turn-never-ends soft-lock reachable by a real human or the heuristic CPU too, not
+just the random bot, and it has been present since the very first engine commit (the
+original "~1-in-5000" text was an anecdotal guess, never an actual measured rate — confirmed
+by re-running the pre-`7ddf4f7` dealing method, which fails at the same ~12% rate).
+
+The mechanism: per `tech-spec.md` §8, a player should be able to choose to stop taking
+optional moves and either draw or pass — but neither `gameStore.ts`'s `settle()` nor
+`simulate.ts`'s random-bot loop implements that "choose to stop" branch; both only ever
+end a turn when **zero** legal moves remain. So if a player's hand+waste both empty out
+(nothing left to draw) while their reserve/houses still hold cards, and exactly one
+always-legal reversible move exists on the board (e.g. one card endlessly swapping between
+two houses), that player's turn literally never ends — the opponent never gets another turn,
+and `checkStalemate` never even runs (it only evaluates at turn boundaries this trap never
+reaches). Full trace/evidence in `docs/known-issues.md`.
+
+**Next step is a design decision, not further investigation**: give the player (human, CPU,
+and the harness) a real way to decline remaining optional moves and fall through to
+draw-or-pass, even while `optional.length > 0`. Needs the user's input on the intended UX
+before implementing — see `docs/known-issues.md`'s entry for the open questions.
 
 ## Things that deviate from tech-spec.md — trust the code, not the spec text
 

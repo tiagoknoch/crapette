@@ -524,49 +524,73 @@ unaffected. Deliberately left as-is per direct user direction — don't "fix" th
 silently shrinking `ROW_GAP`/`ROW_MARGIN`; it needs the same explicit trade-off
 conversation if revisited, since it directly affects desktop card size too.
 
-## OPEN — needs investigation: simulate.ts random/random failure rate is ~13%, not the ~1-in-5000 this entry used to claim
+## RESOLVED — root cause found: a real turn-never-ends soft-lock, reachable in actual play, not just the random harness
 
-**This entry previously read "Known non-bug: rare simulate.ts 'failure' on seed 3925 (and
-similar)" and claimed ~1-in-5000.** That rate claim is now contradicted by direct
-re-measurement and should not be trusted until re-investigated — see below. The original
-per-seed mechanism (two houses ping-ponging forever, described below) may still be
-accurate; what's wrong is the claimed *frequency*, which turned out to be off by roughly
-600×.
+**This entry previously claimed "~1-in-5000" (original text, written the same day as the
+initial engine scaffold), then was retitled "OPEN, ~13% not ~1-in-5000" after
+re-measurement. Both the mechanism and the true frequency are now fully understood —
+see below — and this is reclassified from "harness artifact" to a genuine engine/UI gap
+that a real human or heuristic-CPU player could also hit, just currently only observed via
+the random/random harness.**
 
-**Re-measured 2026-09-07** (same session that did the "Crapette Redesign" toolbar/settings
-work above — confirmed via `git log <redesign-commits> -- src/engine src/ai src/cli`
-returning nothing, so this is not a regression from that work; it was already true of the
-engine beforehand and simply hadn't been re-measured since this entry was written):
+**The mechanism (confirmed 2026-09-07 by instrumenting seed 1 directly, logging every
+move + turn boundary):** a "turn," per `tech-spec.md` §8's own pseudocode, is supposed to
+let the player choose between making an optional move, drawing, or stopping — "player
+keeps moving while legal/compulsory moves exist **and they choose to**." Neither the
+engine's real gameplay path (`gameStore.ts`'s `settle()`) nor `simulate.ts`'s random-bot
+loop actually implements the "choose to stop" branch when `optional.length > 0`:
+- `settle()` (`src/state/gameStore.ts`): `if (legal.compulsory.length > 0 ||
+  legal.optional.length > 0) return;` — it only ever auto-passes the turn when **zero**
+  legal moves of any kind exist. If exactly one optional move exists, the UI just sits
+  there waiting for a click, with nothing else clickable, forever.
+- `simulate.ts`'s `playRandomStep`: `if (optional.length > 0 && (!draw || rng() < 0.6))` —
+  when `canDrawHand` is false (hand *and* waste both empty), `!draw` is `true`, so this
+  condition is unconditionally true whenever `optional.length > 0`. There is no path to
+  `passTurn` in that case; the bot is forced to keep taking the same optional move forever.
 
-- `npm run simulate -- --games 200` (default random/random policy): **25/200 failures
-  (12.5%)**.
-- `npm run simulate -- --games 500`: **66/500 failures (13.2%)**, exact same 66 seeds both
-  times it was run (fully deterministic, as expected — `simulate.ts` seeds each game `i+1`).
-  Failing seeds in the first 500: `1, 9, 10, 30, 51, 65, 69, 72, 82, 84, 87, 88, 91, 99,
-  111, 112, 114, 126, 149, 163, 172, 179, 181, 184, 186, 204, 206, 207, 215, 218, 219, 221,
-  223, 226, 240, 245, 259, 267, 269, 272, 278, 284, 288, 294, 333, 341, 358, 362, 372, 383,
-  385, 401, 413, 414, 420, 425, 443, 446, 454, 463, 470, 473, 476, 482, 497, 498`.
+So the trap is: a player's `hand` and `waste` both empty out (nothing left to draw) while
+their `reserve`/houses still hold cards, and the board happens to have **exactly one**
+always-legal, perfectly reversible move available (e.g., in seed 1, the single card
+`H9-1` — 9♥ from deck-copy 1 — endlessly swapping between `cpu.house[2]` and
+`cpu.house[3]`, because both houses' other card is a black 10 that legally accepts it
+back). Since no code path ever ends the turn while `optional.length > 0`, this specific
+player's turn **never ends** — the opponent never even gets another turn — and the global
+`roundsWithoutProgress` stalemate counter never gets evaluated (it only updates at
+`discardDrawnCardToWaste`/`passTurn`, neither of which this trap ever reaches), so
+`checkStalemate` never has a chance to catch it either. `simulate.ts`'s `MAX_MOVES_PER_GAME`
+cap is the only thing that ever stops it. **This is not specific to the uniform-random
+bot** — the same board state would equally soft-lock a real human (no "give up, pass"
+control exists in the UI while any optional move remains) or the heuristic CPU (`chooseMove`
+would also just keep re-picking the one available move — see `src/ai/cpuPlayer.ts`).
 
-Original mechanism claim, not re-verified this pass: with two decks in play, a card can
-legally ping-pong forever between two houses whose top cards are two different copies of
-the same rank+color (e.g. 5♥ onto either of two black 6s, then back — both directions
-legal under the alternating-color rule, returning to the exact same board state); a
-uniform-random bot can get stuck oscillating in such a pair. This was confirmed via a
-throwaway script re-running the seed 3925 with periodic state-signature logging (signature
-repeated exactly every ~2000 moves) — but that investigation appears to have measured (or
-been written up assuming) a much rarer occurrence than what a fresh `--games 500` run now
-shows. **Next session should**: pick a few of the seeds listed above (seed 1 is convenient —
-it's also the fixed first-ever-deal seed `main.ts` uses, though that's irrelevant to real
-play since a human isn't a uniform-random bot), re-run the same state-signature-logging
-technique, and determine whether (a) the ping-pong mechanism really is now this common, (b)
-there's a second, more common mechanism at play alongside it, or (c) something about the
-engine changed since this entry was originally written (check `git log` on
-`src/engine/deck.ts`, `src/engine/winCheck.ts`, `src/ai/cpuPlayer.ts` for anything that
-could have shifted the odds — e.g. the "shuffle each player's own separate deck" deck-dealing
-fix visible in this repo's history is a plausible candidate, since it changes the exact
-card arrangements every seed produces). Don't "fix" this by making the harness smarter
-before understanding it; it's deliberately dumb/uniform-random per the brief — the question
-is why *this particular* rate changed, not whether the harness needs cleverness.
+**Why the frequency claim was wrong, not why it regressed:** re-ran a byte-for-byte
+reconstruction of the *original* pre-`7ddf4f7` shared-104-card-pool `deal()` (single
+shuffle of both decks combined, then sliced 0–52/52–104) against the same 500 seeds used
+for the current per-player-deck `deal()`: **62/500 failures (12.4%)** under the old dealing
+vs **66/500 (13.2%)** under the current one — statistically indistinguishable (throwaway
+comparison script, not committed). So the "shuffle each player's own separate deck" fix
+(`7ddf4f7`) is **not** the cause of any rate change, because there was no rate change to
+explain — the true rate has been ~12–13% since the very first commit. The original
+"~1-in-5000" text (written in the same commit that also reported "0 unexpected failures"
+in a `--games 5000` validation run) was an anecdotal guess, not a measured rate — it never
+matches an actual full failure count of any batch, and no batch that size could plausibly
+show 0 failures at the real ~13% rate. Confirmed failing seeds for the current `deal()`,
+`--games 500`: `1, 9, 10, 30, 51, 65, 69, 72, 82, 84, 87, 88, 91, 99, 111, 112, 114, 126,
+149, 163, 172, 179, 181, 184, 186, 204, 206, 207, 215, 218, 219, 221, 223, 226, 240, 245,
+259, 267, 269, 272, 278, 284, 288, 294, 333, 341, 358, 362, 372, 383, 385, 401, 413, 414,
+420, 425, 443, 446, 454, 463, 470, 473, 476, 482, 497, 498`.
+
+**Not fixed yet — needs a design decision, flagged to the user 2026-09-07**: the fix
+implied by §8's own pseudocode is to give the player (human, CPU, and the harness) a real
+"decline remaining optional moves, then draw if possible or otherwise pass" action reachable
+even while `optional.length > 0` — i.e. `settle()`/the harness's step function should be
+able to reach `passTurn` (or draw) once the player doesn't *want* any of the remaining
+optional moves, not only once none exist at all. This is an engine-behavior/rules change
+(what "the player chooses" means operationally), not a random-harness tweak, so don't
+implement it without confirming the intended UX first (e.g. does the human get an explicit
+"pass" affordance, or does `settle()` just auto-pass once every remaining optional move is
+a no-op cycle back to a previously-seen state — the latter needs a state-signature/visited-
+state check per turn, more engine machinery than the former).
 
 ## Known non-bug: rare simulate.ts "failure" on seed 885 with `--heuristic-human --heuristic-cpu`
 
