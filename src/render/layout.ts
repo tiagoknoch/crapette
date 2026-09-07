@@ -40,6 +40,29 @@ const ROW_MARGIN = 60;
 // as the landscape arrangement's flank-to-middle-block clearance — a house's fan grows
 // toward that same gap in landscape mode too, so the room it needs doesn't change.
 const HOUSE_FAN_ALLOWANCE = 6 * HOUSE_OVERLAP_X;
+// DESIGN_RULES.md §6, "the fan clamp — implement this first": below this peek, rank/suit
+// stop being legible, so a house long enough to reach it stacks fully rather than shrinking
+// further (see houseFanPeek).
+const HOUSE_FAN_PEEK_FLOOR = 0.1 * CARD_WIDTH;
+
+// A house's fan previously used HOUSE_OVERLAP_X as a constant per-card peek, so its total
+// width (card + (n-1) * peek) was unbounded — long enough (observed: ~8 cards) and it runs
+// into a neighboring pile, which also breaks that pile's hit-testing (a card drawn across a
+// pile boundary is never allowed — DESIGN_RULES.md §6's invariant). Budgets the *whole*
+// house's fan against the real clear space instead: short houses still fan at the natural
+// peek (HOUSE_OVERLAP_X, the maximum), longer ones compress evenly rather than escaping, and
+// a house long enough to hit HOUSE_FAN_PEEK_FLOOR stops shrinking further — its true length
+// is left to the count badge instead. `clear` is HOUSE_FAN_ALLOWANCE, the same fixed gap
+// already budgeted between a house column and its nearest neighbor in both portrait and
+// landscape (see GRID_MARGIN / LANDSCAPE_MIDDLE_ORIGIN), so this needs no mode parameter.
+// Call this from every site that fans a house — there are three (the top-card point used for
+// click/flash resolution, the per-card render position, and the drag origin, all in
+// scene.ts) — so the card you see and the card you can grab never disagree.
+export function houseFanPeek(cardCount: number): number {
+  if (cardCount <= 1) return HOUSE_OVERLAP_X;
+  const naturalPeek = HOUSE_FAN_ALLOWANCE / (cardCount - 1);
+  return Math.min(Math.max(naturalPeek, HOUSE_FAN_PEEK_FLOOR), HOUSE_OVERLAP_X);
+}
 // The house columns sit further in from the edge than the plain row margin, to leave that
 // fan-out room. Portrait-only — landscape's middle block is positioned relative to its own
 // flanks instead (see LANDSCAPE_MIDDLE_ORIGIN), not the canvas edge.

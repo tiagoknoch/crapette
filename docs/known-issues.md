@@ -267,14 +267,40 @@ anywhere in `scene.ts`, so new code stays conservative rather than assuming the 
 exception extends to it.
 
 **Deferred to a later round** (not built this pass, flagged so a future session doesn't
-have to re-derive scope from the handoff again): the "fan clamp" bug fix (house fans are
-currently unbounded-width and can run over the waste — `DESIGN_RULES.md` §6, flagged as the
-one must-fix item in the v2 handoff); the landscape geometry constants
+have to re-derive scope from the handoff again): the landscape geometry constants
 (`LANDSCAPE_ROW_MARGIN = 24`, `HOUSE_FAN_ALLOWANCE = 286`) and the `pileLayout` (ROWS/
 SIDES) setting; Settings real content; drag-state polish; the drawn-card play/discard
 panel; the live CPU move-description indicator; and a `docs/tech-spec.md` §5 touch-up once
 the geometry constants land. The pulsing legal-target ring and dashed loadable-pile ring
-remain out of scope for the same architecture-rule reason as the first redesign round.
+remain out of scope for the same architecture-rule reason as the first redesign round. (The
+"fan clamp" bug fix that used to be listed here was done in the very next phase — see the
+entry directly below.)
+
+## Fixed: house fan had no width clamp — a long enough house ran over its neighbor
+
+`HOUSE_OVERLAP_X` (26 logical units) was a constant per-card peek, so a house's total fan
+width (`card + (n − 1) × peek`) was unbounded — a house of ~8+ cards could fan far enough to
+visually overlap the adjacent waste pile, which also breaks that pile's hit-testing (a card
+drawn across a pile boundary silently eats clicks meant for the pile underneath). Flagged as
+the one must-fix bug in the redesign v2 handoff (`DESIGN_RULES.md` §6).
+
+Fixed by budgeting the *whole* house's fan against the real clear space instead of a fixed
+per-card peek: `houseFanPeek(cardCount)` in `layout.ts` returns
+`clamp(HOUSE_FAN_ALLOWANCE / (n − 1), 0.10 × CARD_WIDTH, HOUSE_OVERLAP_X)` — short houses
+still fan at the natural (maximum) peek, longer ones compress evenly, and a house long
+enough to hit the floor (~18+ cards, with today's `HOUSE_FAN_ALLOWANCE = 156`) stops
+shrinking further rather than escaping; its true length is left to the count badge. Called
+from all three sites that previously inlined `HOUSE_OVERLAP_X` directly (`effectiveSlotPoint`
+and `drawHouse`'s per-card/top-card points in `scene.ts`), so the card you see and the card
+you can click/drag never disagree. Verified live with a fabricated 22-card house (well past
+the old constant-peek overflow point) — the fan compresses and stays inside the allotted gap
+instead of overlapping the reserve pile.
+
+Not done in this pass: `HOUSE_FAN_ALLOWANCE` itself is unchanged (still `6 ×
+HOUSE_OVERLAP_X`, i.e. 156) — the v2 handoff's larger landscape-only allowance (286, freed up
+by the `LANDSCAPE_ROW_MARGIN` change) is part of the still-deferred landscape geometry work
+above, not this fix. The clamp is correct either way; it just has less room to work with
+until that lands.
 
 ## Rules question, confirmed not a rule: empty house doesn't force a waste-pile fill once reserve is empty
 

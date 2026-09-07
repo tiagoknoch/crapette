@@ -20,7 +20,7 @@ import {
   computeTableLayout,
   FOUNDATION_ROW_SUIT,
   HOUSE_FAN_SIGN,
-  HOUSE_OVERLAP_X,
+  houseFanPeek,
   logicalSize,
   type PlayerRowLayout,
   type Point,
@@ -278,7 +278,7 @@ function effectiveSlotPoint(state: GameState, ref: PileRef, mode: TableMode): Po
   if (!base || ref.type !== 'house') return base;
   const count = state.players[ref.owner].houses[ref.index].length;
   const sign = HOUSE_FAN_SIGN[ref.owner];
-  return { x: base.x + Math.max(count - 1, 0) * sign * HOUSE_OVERLAP_X, y: base.y };
+  return { x: base.x + Math.max(count - 1, 0) * sign * houseFanPeek(count), y: base.y };
 }
 
 // Logical (root-local, pre-letterbox-scale) pixels of pointer movement before a pointerdown
@@ -1316,11 +1316,12 @@ function drawHouse(scene: TableScene, layer: Container, cards: Card[], point: Po
     return;
   }
   const sign = HOUSE_FAN_SIGN[owner];
+  const peek = houseFanPeek(cards.length);
   let topSprite: Sprite | undefined;
   let topSpritePoint: Point | undefined;
   let topCardId: string | undefined;
   cards.forEach((card, i) => {
-    const cardPoint = { x: point.x + i * sign * HOUSE_OVERLAP_X, y: point.y - (i === cards.length - 1 && highlight.lifted ? SELECTED_LIFT_Y : 0) };
+    const cardPoint = { x: point.x + i * sign * peek, y: point.y - (i === cards.length - 1 && highlight.lifted ? SELECTED_LIFT_Y : 0) };
     drawCardShadow(layer, cardPoint);
     const sprite = createCardSprite(card);
     sprite.alpha = highlight.dimmed ? 0.5 : 1;
@@ -1337,7 +1338,7 @@ function drawHouse(scene: TableScene, layer: Container, cards: Card[], point: Po
     makeClickable(topSprite, ref, scene.onSlotClick);
     scene.dragController.attach(topSprite, ref, topSpritePoint, topCardId);
   }
-  const topPoint = { x: point.x + (cards.length - 1) * sign * HOUSE_OVERLAP_X, y: point.y };
+  const topPoint = { x: point.x + (cards.length - 1) * sign * peek, y: point.y };
   if (highlight.lifted) drawSelectionBorder(layer, topPoint);
   if (highlight.forced) drawForcedRing(layer, topPoint);
   drawCountBadge(layer, point, cards.length);

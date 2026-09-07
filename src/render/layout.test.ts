@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { chooseTableMode, computeFoundationDisplayOrder, computeTableLayout, FOUNDATION_ROW_SUIT, TOOLBAR_HEIGHT } from './layout.ts';
+import {
+  CARD_WIDTH,
+  chooseTableMode,
+  computeFoundationDisplayOrder,
+  computeTableLayout,
+  FOUNDATION_ROW_SUIT,
+  HOUSE_OVERLAP_X,
+  houseFanPeek,
+  TOOLBAR_HEIGHT,
+} from './layout.ts';
 import type { FoundationSlot } from '../engine/types.ts';
 
 function emptyFoundations(): FoundationSlot[] {
@@ -99,6 +108,37 @@ describe('computeTableLayout landscape branch', () => {
     expect(landscape.cpu.waste.y).toBeLessThan(landscape.cpu.hand.y);
     expect(landscape.human.hand.y).toBeLessThan(landscape.human.waste.y);
     expect(landscape.human.waste.y).toBeLessThan(landscape.human.reserve.y);
+  });
+});
+
+describe('houseFanPeek (DESIGN_RULES.md §6 fan clamp)', () => {
+  it('uses the natural (maximum) peek for a house short enough to fan freely', () => {
+    expect(houseFanPeek(0)).toBe(HOUSE_OVERLAP_X);
+    expect(houseFanPeek(1)).toBe(HOUSE_OVERLAP_X);
+    // clear (6 * HOUSE_OVERLAP_X = 156) / (n - 1) still >= HOUSE_OVERLAP_X through n = 7.
+    expect(houseFanPeek(7)).toBe(HOUSE_OVERLAP_X);
+  });
+
+  it('compresses evenly once the natural peek would exceed the clear space', () => {
+    const peek = houseFanPeek(8);
+    expect(peek).toBeLessThan(HOUSE_OVERLAP_X);
+    expect(peek).toBeCloseTo((6 * HOUSE_OVERLAP_X) / 7);
+  });
+
+  it('never compresses below the legibility floor, however long the house grows', () => {
+    const floor = 0.1 * CARD_WIDTH;
+    expect(houseFanPeek(18)).toBeCloseTo(floor);
+    expect(houseFanPeek(52)).toBeCloseTo(floor); // a near-worst-case house (most of a deck)
+    expect(houseFanPeek(52)).toBeGreaterThanOrEqual(floor - 1e-9);
+  });
+
+  it('is monotonically non-increasing as a house grows — never gets peekier by adding a card', () => {
+    let previous = houseFanPeek(1);
+    for (let n = 2; n <= 40; n++) {
+      const peek = houseFanPeek(n);
+      expect(peek).toBeLessThanOrEqual(previous + 1e-9);
+      previous = peek;
+    }
   });
 });
 
