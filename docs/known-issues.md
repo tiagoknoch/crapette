@@ -270,12 +270,12 @@ exception extends to it.
 
 **Deferred to a later round** (not built this pass, flagged so a future session doesn't
 have to re-derive scope from the handoff again): the `pileLayout` (ROWS/SIDES) setting;
-Settings real content; drag-state polish; the drawn-card play/discard panel; and a
-`docs/tech-spec.md` §5 touch-up once the `pileLayout` setting lands. The pulsing
-legal-target ring and dashed loadable-pile ring remain out of scope for the same
-architecture-rule reason as the first redesign round. (The "fan clamp" bug fix, the
-landscape geometry constants, and the live CPU move-description indicator that used to be
-listed here were all done in later phases — see the entries directly below.)
+Settings real content; the drawn-card play/discard panel; and a `docs/tech-spec.md` §5
+touch-up once the `pileLayout` setting lands. The pulsing legal-target ring and dashed
+loadable-pile ring remain out of scope for the same architecture-rule reason as the first
+redesign round. (The "fan clamp" bug fix, the landscape geometry constants, the live CPU
+move-description indicator, and drag-state polish that used to be listed here were all done
+in later phases — see the entries directly below.)
 
 ## Fixed: house fan had no width clamp — a long enough house ran over its neighbor
 
@@ -359,6 +359,50 @@ human. The move-description branches (foundation/own-house/opponent-house/reserv
 share the same rendering path and were verified via `tsc`/tests rather than caught live on
 screen — the 700ms CPU tick interval made reliably screenshotting one specific branch
 impractical, not a sign anything about that path is untested.
+
+## Feature: drag-state polish — pick-up lift and drop-rejected shake (DESIGN_RULES.md §7)
+
+Picking up a card previously just reparented it into `dragLayer` and had it track the
+pointer 1:1 with no visual acknowledgment; a rejected drop just snapped the card back to its
+home point with zero feedback beyond the (shared with taps) red flash toast. Adds both
+states from the mockup: **pick-up** eases the card to `scale(1.05)` and `y −6` over 120ms
+(`LIFT_DURATION_MS`/`LIFT_Y_OFFSET`/`LIFT_SCALE` in `scene.ts`), plus a stronger "lifted"
+shadow (`LIFTED_SHADOW_OFFSET`/`LIFTED_SHADOW_ALPHA`, DESIGN_RULES.md §4's elevation table)
+redrawn every frame at the card's live position; **drop-rejected** eases the card back to its
+home point over 260ms with a decaying x-oscillation (3 cycles) and a single rotation hump
+mid-shake (`SHAKE_*` constants), rather than an instant teleport.
+
+The lift is ticker-driven (not just computed inline from pointer movement) so it completes
+even if the pointer holds still past 120ms, guarded by comparing the ticker callback's
+captured `DragState` object against the live `dragging` variable so a stale tick from an
+already-ended drag can never touch a later one.
+
+**The harder part was architectural, not visual.** `attemptDragMove`'s caller
+(`endDrag` in the drag controller) needs to know whether a drop was *accepted* or *rejected*
+to decide whether to let it stand or play the shake — but `gameStore.ts`'s `notify()` (which
+triggers the full `renderGameState` re-render, including `cardsLayer.removeChildren()`) fires
+**synchronously inside** `attemptDragMove`, before `endDrag` gets control back. The original
+code handled this by moving the dragged sprite into `cardsLayer` *before* calling `onDrop`,
+so on a re-render it always got swept away as part of the rebuild regardless of outcome —
+which meant no animation on that sprite was ever actually visible, accepted or rejected
+(confirmed by reading the code, not assumed). Fixed two ways at once: `DropHandler` (and
+`attemptDragMove`/`resolveMove`/`attemptMove` in `gameStore.ts`) now return a boolean —
+whether the move was actually applied — and the dragged sprite stays in `dragLayer` (which
+`renderGameState` never touches) for the whole gesture instead of being reparented into
+`cardsLayer` first, so it survives the synchronous re-render and can actually animate: on
+acceptance it's simply removed (the re-render already placed a fresh sprite at the real
+position); on rejection it shakes back to its home point, then gets removed, revealing the
+real (unchanged) card already sitting there.
+
+Verified live (Playwright, real `PointerEvent`s dispatched at coordinates computed from a
+dynamically-imported `layout.ts` + a real legal/illegal move picked via `moveResolver.ts` —
+same technique as this file's other Playwright-verified entries): the lift + elevated shadow
+are clearly visible mid-drag on a legal drag; a screenshot taken immediately after dropping
+on a guaranteed-illegal target (a king onto an empty foundation) landed just after the
+260ms shake had already finished, but the end state confirms it ran cleanly — no leftover
+ghost sprite, the card back at its unchanged home pile, and the console log showing
+`human drags K♥: human.reserve -> foundation[0]` followed immediately by the `rejected:`
+line, proving the reject path (and therefore the shake branch) actually fired.
 
 ## Rules question, confirmed not a rule: empty house doesn't force a waste-pile fill once reserve is empty
 

@@ -295,12 +295,16 @@ function discardDrawn(mover: PlayerId): void {
   settle();
 }
 
-function attemptMove(move: Move, mover: PlayerId): void {
+// Returns whether the move was actually applied — the drag controller (see
+// attemptDragMove/resolveMove below) needs this to tell a legal drop from a rejected one, to
+// choose between letting it stand and playing the reject shake (DESIGN_RULES.md §7). The tap
+// flow (handleSlotClick) ignores it; a rejected tap already gets its own flash overlay.
+function attemptMove(move: Move, mover: PlayerId): boolean {
   state = startTurn(state);
   const evaluation = evaluateMove(state, move);
   if (!evaluation.legal) {
     showReject(move.to, evaluation.reason ?? 'not-available');
-    return;
+    return false;
   }
   const previousStatus = state.status;
   log(`${mover} plays ${cardLabel(move.card)}: ${pileLabel(move.from)} -> ${pileLabel(move.to)}`);
@@ -308,6 +312,7 @@ function attemptMove(move: Move, mover: PlayerId): void {
   logGameEndIfJustEnded(previousStatus);
   selected = null;
   settle();
+  return true;
 }
 
 // §14 step 8: resolves the drawn card sitting face-up in the CPU's hand — mirrors
@@ -392,22 +397,25 @@ export function cpuStep(): void {
 // Doesn't touch `selected`, except where matching the original tap behavior requires it
 // (the discard branch clears it unconditionally; that's a harmless no-op for drag, which
 // never sets `selected` to begin with).
-function resolveMove(source: PileRef, target: PileRef, mover: PlayerId): void {
+// Returns whether the action was actually applied — see attemptMove's comment; the discard
+// special-case and the "no card there" defensive branch both count as "applied" (there was
+// no legality question to reject), so only the regular attemptMove call can return false.
+function resolveMove(source: PileRef, target: PileRef, mover: PlayerId): boolean {
   // Special case: targeting your own waste while your own drawn hand card is the source
   // means "discard it" — waste is otherwise always a forbidden destination for a regular
   // move (rules.ts), so this can't be reached any other way.
   if (source.type === 'hand' && source.owner === mover && target.type === 'waste' && target.owner === mover) {
     discardDrawn(mover);
     selected = null;
-    return;
+    return true;
   }
 
   const card = topCardOf(state, source);
   if (!card) {
     selected = null;
-    return;
+    return true;
   }
-  attemptMove({ card, from: source, to: target }, mover);
+  return attemptMove({ card, from: source, to: target }, mover);
 }
 
 // The single entry point for every click on a pile slot (whether it currently holds a card
@@ -459,12 +467,15 @@ export function canPickUp(ref: PileRef): boolean {
 // calls this once per completed drag (never for a plain tap, and never when dropped back
 // onto its own origin), and it's responsible for its own notify() the same way
 // handleSlotClick is for taps, since nothing else triggers a re-render after a drop.
-export function attemptDragMove(from: PileRef, to: PileRef): void {
-  if (state.status !== 'in_progress' || state.turn !== 'human') return;
+// Returns whether the drop was accepted (see DropHandler in scene.ts) — the drag controller
+// uses this to choose between letting the drop stand and playing the reject shake instead.
+export function attemptDragMove(from: PileRef, to: PileRef): boolean {
+  if (state.status !== 'in_progress' || state.turn !== 'human') return false;
   const mover = state.turn;
-  if (!isSelectableSource(from, mover)) return; // defensive; canPickUp already gated this at drag-start
+  if (!isSelectableSource(from, mover)) return false; // defensive; canPickUp already gated this at drag-start
   const card = topCardOf(state, from);
   log(`${mover} drags ${card ? cardLabel(card) : '?'}: ${pileLabel(from)} -> ${pileLabel(to)}`);
-  resolveMove(from, to, mover);
+  const accepted = resolveMove(from, to, mover);
   notify();
+  return accepted;
 }

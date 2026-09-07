@@ -62,6 +62,11 @@ const SLOT_CORNER_RADIUS = 8;
 const CARD_SHADOW_OFFSET = 4;
 const CARD_SHADOW_COLOR = 0x000000;
 const CARD_SHADOW_ALPHA = 0.32;
+// DESIGN_RULES.md §4's "Lifted (held)" elevation level — the actively-dragged card's own
+// shadow, drawn fresh each frame in the drag controller (see dragShadow), distinct from the
+// flat per-render shadow every other card gets from drawCardShadow above.
+const LIFTED_SHADOW_OFFSET = 14;
+const LIFTED_SHADOW_ALPHA = 0.5;
 
 // Depth-cue filler layers for stock-style piles (talon/waste/reserve) — see drawStackedPile.
 const STACK_DEPTH_MAX_LAYERS = 6;
@@ -82,6 +87,17 @@ const CARD_MOVE_DURATION_MS = 260;
 // How long a face-down/face-up flip takes (e.g. drawing a hand card face-up in place) — half
 // shrinking to a sliver, half growing back out, texture swapped at the midpoint.
 const CARD_FLIP_DURATION_MS = 220;
+
+// Drag states (DESIGN_RULES.md §7) — pick-up "lift" (scale + rise, eases in as the drag
+// starts) and drop-rejected "shake" (an oscillating, decaying return to the home point, with
+// a single rotation hump mid-shake). Both live in createDragController below.
+const LIFT_DURATION_MS = 120;
+const LIFT_Y_OFFSET = 6;
+const LIFT_SCALE = 1.05;
+const SHAKE_DURATION_MS = 260;
+const SHAKE_CYCLES = 3;
+const SHAKE_X_AMPLITUDE = 7;
+const SHAKE_MAX_ROTATION = -0.07; // radians — matches the mockup's rotate(-4deg) mid-shake
 
 // §14 step 9: a small badge showing exactly how many cards are in a pile — pile counts are
 // a HUD feature distinct from stackDepthLayers' *impression* of depth (that's cosmetic only,
@@ -150,7 +166,10 @@ export interface FeedbackFlash {
 
 export type SlotClickHandler = (ref: PileRef) => void;
 export type CanPickUp = (ref: PileRef) => boolean;
-export type DropHandler = (from: PileRef, to: PileRef) => void;
+// Returns whether the drop was accepted — the drag controller needs this to choose between
+// letting the drop stand (a real move already re-rendered the card into place) and playing
+// the reject shake (DESIGN_RULES.md §7) on the card that just bounced off an illegal target.
+export type DropHandler = (from: PileRef, to: PileRef) => boolean;
 
 export interface TableSceneHandlers {
   onSlotClick: SlotClickHandler;
@@ -306,16 +325,23 @@ interface DragState {
   startLocal: Point;
   moved: boolean;
   cardId: string;
+  // Eased 0 -> LIFT_Y_OFFSET over LIFT_DURATION_MS by a ticker callback started at pickup
+  // (see attach) — read continuously by onMove so the lift completes even if the pointer
+  // holds still past the animation's own duration, not just while it happens to be moving.
+  liftOffset: number;
 }
 
 // §14 step 10.5: drag-and-drop, added alongside tap-to-select rather than replacing it (see
 // TableSceneHandlers). Deliberately no legal-destination highlighting mid-drag, matching the
 // established reactive-only philosophy (gameStore.ts's file comment) — illegal drops get the
-// same red-flash + reason banner a rejected tap gets, nothing is disabled or glowed in
-// advance. The dragged sprite is reparented into `dragLayer` (so it renders above every other
-// pile) for the gesture's duration and reparented back into `cardsLayer` the moment it ends,
-// regardless of outcome — a genuine move re-renders cardsLayer from scratch anyway, so that
-// reparent-back is only actually load-bearing for the tap/cancel paths.
+// same red-flash + reason banner a rejected tap gets, plus a reject shake on the card itself
+// (DESIGN_RULES.md §7) — nothing is disabled or glowed in advance. The dragged sprite lives
+// in `dragLayer` (so it renders above every other pile, and — critically — survives the full
+// `cardsLayer.removeChildren()` rebuild every `renderGameState` call does, unlike anything
+// actually parented there) for the whole gesture, including any post-drop shake; it's only
+// ever reparented into `cardsLayer` for the plain-tap/aborted-gesture case, where there's no
+// animation to protect and the sprite just needs to end up back where normal rendering
+// expects it.
 function createDragController(
   app: Application,
   root: Container,
@@ -328,6 +354,8 @@ function createDragController(
   let latestMode: TableMode = 'portrait';
   let dragging: DragState | null = null;
   let justDraggedCardId: string | null = null;
+  const dragShadow = new Graphics(); // DESIGN_RULES.md §4's "Lifted (held)" elevation level
+  dragLayer.addChild(dragShadow);
 
   function toLocal(event: FederatedPointerEvent): Point {
     return root.toLocal(event.global);
@@ -346,10 +374,51 @@ function createDragController(
   function onMove(event: FederatedPointerEvent): void {
     if (!dragging) return;
     const local = toLocal(event);
-    dragging.sprite.position.set(local.x, local.y);
+    const liftedY = local.y - dragging.liftOffset;
+    dragging.sprite.position.set(local.x, liftedY);
+    dragShadow
+      .clear()
+      .roundRect(
+        local.x - CARD_WIDTH / 2 + LIFTED_SHADOW_OFFSET,
+        liftedY - CARD_HEIGHT / 2 + LIFTED_SHADOW_OFFSET,
+        CARD_WIDTH,
+        CARD_HEIGHT,
+        SLOT_CORNER_RADIUS,
+      )
+      .fill({ color: CARD_SHADOW_COLOR, alpha: LIFTED_SHADOW_ALPHA });
     if (!dragging.moved && Math.hypot(local.x - dragging.startLocal.x, local.y - dragging.startLocal.y) > DRAG_MOVE_THRESHOLD) {
       dragging.moved = true;
     }
+  }
+
+  // DESIGN_RULES.md §7's "Drop rejected" state: an oscillating, decaying return to the home
+  // point over SHAKE_DURATION_MS, with a single rotation hump mid-shake — not an instant
+  // snap. The sprite stays in dragLayer for this (see the file comment above for why) and is
+  // only removed once the shake finishes, revealing the real, unchanged card already sitting
+  // motionless at homePoint in cardsLayer underneath (nothing about game state changed, so
+  // that render never had anything to animate).
+  function shakeToHome(sprite: Sprite, home: Point): void {
+    const start = performance.now();
+    const fromX = sprite.position.x;
+    const fromY = sprite.position.y;
+    const fromScale = sprite.scale.x;
+    const tick = (): void => {
+      const t = Math.min(1, (performance.now() - start) / SHAKE_DURATION_MS);
+      const eased = easeOutCubic(t);
+      const decay = 1 - t;
+      const oscillation = Math.sin(t * Math.PI * 2 * SHAKE_CYCLES) * SHAKE_X_AMPLITUDE * decay;
+      const rotationEnvelope = Math.sin(t * Math.PI); // 0 -> 1 -> 0, peaks mid-shake
+      sprite.position.set(fromX + (home.x - fromX) * eased + oscillation, fromY + (home.y - fromY) * eased);
+      sprite.rotation = SHAKE_MAX_ROTATION * rotationEnvelope;
+      sprite.scale.set(fromScale + (1 - fromScale) * eased);
+      if (t >= 1) {
+        sprite.rotation = 0;
+        dragShadow.clear();
+        dragLayer.removeChild(sprite);
+        app.ticker.remove(tick);
+      }
+    };
+    app.ticker.add(tick);
   }
 
   function endDrag(event: FederatedPointerEvent): void {
@@ -357,16 +426,38 @@ function createDragController(
     const { ref, sprite, homePoint, moved, cardId } = dragging;
     dragging = null;
     app.stage.off('pointermove', onMove);
-    cardsLayer.addChild(sprite);
-    sprite.position.set(homePoint.x, homePoint.y);
-    if (!moved) return; // a plain tap — onSlotClick's own pointertap handling covers it
+    if (!moved) {
+      // A plain tap — onSlotClick's own pointertap handling covers the actual action; this
+      // just needs to put the sprite back where normal rendering expects it.
+      dragShadow.clear();
+      cardsLayer.addChild(sprite);
+      sprite.position.set(homePoint.x, homePoint.y);
+      sprite.scale.set(1);
+      return;
+    }
     const target = hitTestDrop(toLocal(event));
     if (target && !refsEqual(target, ref)) {
-      // The user's own pointer already smoothly carried this card to its new spot — the
-      // upcoming re-render shouldn't tween it again from its pre-drag origin (see placeCard).
+      // The user's own pointer already smoothly carried this card to its new spot — if the
+      // move is accepted, the upcoming re-render shouldn't tween it again from its pre-drag
+      // origin (see placeCard). Cleared again below if it turns out to be rejected instead,
+      // since then nothing actually moved.
       justDraggedCardId = cardId;
-      onDrop(ref, target);
+      const accepted = onDrop(ref, target); // synchronous — gameStore's notify() re-renders cardsLayer before this returns
+      dragShadow.clear();
+      if (accepted) {
+        dragLayer.removeChild(sprite); // the re-render already placed a fresh sprite in cardsLayer
+      } else {
+        justDraggedCardId = null;
+        shakeToHome(sprite, homePoint);
+      }
+      return;
     }
+    // Dropped back on its own origin, or nowhere valid — an aborted gesture, not a rejected
+    // move attempt, so no shake; just put it back.
+    dragShadow.clear();
+    cardsLayer.addChild(sprite);
+    sprite.position.set(homePoint.x, homePoint.y);
+    sprite.scale.set(1);
   }
 
   app.stage.eventMode = 'static';
@@ -390,8 +481,25 @@ function createDragController(
       sprite.on('pointerdown', (event: FederatedPointerEvent) => {
         if (!canPickUp(ref)) return;
         dragLayer.addChild(sprite);
-        dragging = { ref, sprite, homePoint, startLocal: toLocal(event), moved: false, cardId };
+        const session: DragState = { ref, sprite, homePoint, startLocal: toLocal(event), moved: false, cardId, liftOffset: 0 };
+        dragging = session;
         app.stage.on('pointermove', onMove);
+        // DESIGN_RULES.md §7's pick-up "lift" — eases scale/rise in over LIFT_DURATION_MS.
+        // Ticker-driven (not just computed inline in onMove) so it completes even if the
+        // pointer holds still the whole time; guarded by object identity so a stale tick from
+        // an already-ended drag never touches a later one.
+        const start = performance.now();
+        const tick = (): void => {
+          if (dragging !== session) {
+            app.ticker.remove(tick);
+            return;
+          }
+          const eased = easeOutCubic(Math.min(1, (performance.now() - start) / LIFT_DURATION_MS));
+          session.liftOffset = LIFT_Y_OFFSET * eased;
+          sprite.scale.set(1 + (LIFT_SCALE - 1) * eased);
+          if (eased >= 1) app.ticker.remove(tick);
+        };
+        app.ticker.add(tick);
       });
     },
   };
