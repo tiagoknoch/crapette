@@ -524,19 +524,49 @@ unaffected. Deliberately left as-is per direct user direction — don't "fix" th
 silently shrinking `ROW_GAP`/`ROW_MARGIN`; it needs the same explicit trade-off
 conversation if revisited, since it directly affects desktop card size too.
 
-## Known non-bug: rare simulate.ts "failure" on seed 3925 (and similar)
+## OPEN — needs investigation: simulate.ts random/random failure rate is ~13%, not the ~1-in-5000 this entry used to claim
 
-`npm run simulate -- --games 5000` will very occasionally (~1-in-5000 seeds) report a
-game exceeding `MAX_MOVES_PER_GAME` in `src/cli/simulate.ts`. Investigated and confirmed
-**not an engine bug**: with two decks in play, a card can legally ping-pong forever
-between two houses whose top cards are two different copies of the same rank+color (e.g.
-5♥ onto either of two black 6s, then back — both directions legal under the
-alternating-color rule, returning to the exact same board state). A uniform-random bot
-can rarely get stuck oscillating in such a pair. Confirmed via a throwaway script that
-re-ran the capped seed with periodic state-signature logging — the signature repeated
-exactly every ~2000 moves. Don't "fix" this by making the harness smarter; it's
-deliberately dumb/uniform-random per the brief. If it starts happening much more often
-than ~1-in-thousands, that would be worth re-investigating.
+**This entry previously read "Known non-bug: rare simulate.ts 'failure' on seed 3925 (and
+similar)" and claimed ~1-in-5000.** That rate claim is now contradicted by direct
+re-measurement and should not be trusted until re-investigated — see below. The original
+per-seed mechanism (two houses ping-ponging forever, described below) may still be
+accurate; what's wrong is the claimed *frequency*, which turned out to be off by roughly
+600×.
+
+**Re-measured 2026-09-07** (same session that did the "Crapette Redesign" toolbar/settings
+work above — confirmed via `git log <redesign-commits> -- src/engine src/ai src/cli`
+returning nothing, so this is not a regression from that work; it was already true of the
+engine beforehand and simply hadn't been re-measured since this entry was written):
+
+- `npm run simulate -- --games 200` (default random/random policy): **25/200 failures
+  (12.5%)**.
+- `npm run simulate -- --games 500`: **66/500 failures (13.2%)**, exact same 66 seeds both
+  times it was run (fully deterministic, as expected — `simulate.ts` seeds each game `i+1`).
+  Failing seeds in the first 500: `1, 9, 10, 30, 51, 65, 69, 72, 82, 84, 87, 88, 91, 99,
+  111, 112, 114, 126, 149, 163, 172, 179, 181, 184, 186, 204, 206, 207, 215, 218, 219, 221,
+  223, 226, 240, 245, 259, 267, 269, 272, 278, 284, 288, 294, 333, 341, 358, 362, 372, 383,
+  385, 401, 413, 414, 420, 425, 443, 446, 454, 463, 470, 473, 476, 482, 497, 498`.
+
+Original mechanism claim, not re-verified this pass: with two decks in play, a card can
+legally ping-pong forever between two houses whose top cards are two different copies of
+the same rank+color (e.g. 5♥ onto either of two black 6s, then back — both directions
+legal under the alternating-color rule, returning to the exact same board state); a
+uniform-random bot can get stuck oscillating in such a pair. This was confirmed via a
+throwaway script re-running the seed 3925 with periodic state-signature logging (signature
+repeated exactly every ~2000 moves) — but that investigation appears to have measured (or
+been written up assuming) a much rarer occurrence than what a fresh `--games 500` run now
+shows. **Next session should**: pick a few of the seeds listed above (seed 1 is convenient —
+it's also the fixed first-ever-deal seed `main.ts` uses, though that's irrelevant to real
+play since a human isn't a uniform-random bot), re-run the same state-signature-logging
+technique, and determine whether (a) the ping-pong mechanism really is now this common, (b)
+there's a second, more common mechanism at play alongside it, or (c) something about the
+engine changed since this entry was originally written (check `git log` on
+`src/engine/deck.ts`, `src/engine/winCheck.ts`, `src/ai/cpuPlayer.ts` for anything that
+could have shifted the odds — e.g. the "shuffle each player's own separate deck" deck-dealing
+fix visible in this repo's history is a plausible candidate, since it changes the exact
+card arrangements every seed produces). Don't "fix" this by making the harness smarter
+before understanding it; it's deliberately dumb/uniform-random per the brief — the question
+is why *this particular* rate changed, not whether the harness needs cleverness.
 
 ## Known non-bug: rare simulate.ts "failure" on seed 885 with `--heuristic-human --heuristic-cpu`
 

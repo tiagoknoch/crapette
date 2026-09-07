@@ -28,18 +28,34 @@ it for convenience.
 ## Project status
 
 Feature-complete v1: engine, CPU heuristic AI, PixiJS rendering (tap-to-select +
-drag-and-drop, tweened moves/flips), i18n (en/pt with a manual switcher), and
+drag-and-drop, tweened moves/flips, drag lift/shake, a live CPU move-description
+indicator, a drawn-card play/discard panel), i18n (en/pt with a manual switcher), and
 localStorage autosave/resume are all built and working. Nothing under `/src/ui` exists
 as a separate directory — all HUD/modal code (pile counts, end screen, About/Legal, New
-Game confirm popover, How to Play, Settings stub, EN/PT toolbar toggle) lives directly in
-`src/render/pixi/scene.ts`, in a top toolbar band (replacing an earlier footer row — see
-`docs/known-issues.md`'s toolbar entry). See `docs/build-log.md` for the full step-by-step
-history.
+Game confirm popover, How to Play, Settings with a real Pile layout SIDES/ROWS toggle,
+EN/PT toolbar toggle) lives directly in `src/render/pixi/scene.ts`, in a top toolbar band
+(replacing an earlier footer row — see `docs/known-issues.md`'s toolbar entry). See
+`docs/build-log.md` for the full step-by-step history.
 
 The engine/AI/CLI/render/state code is still young — fields or functions with no usages
 elsewhere in the repo are safe to add, rename, or remove as the implementation is worked
 out; this isn't yet a stable public API with external callers to preserve compatibility
 for.
+
+## Handover — open investigation for the next session
+
+While wrapping up the "Crapette Redesign" v2 work below, a routine `npm run simulate`
+sanity check turned up something that needs a real look: **the default random/random
+policy fails (hits `MAX_MOVES_PER_GAME`) on ~13% of games** (66/500 in a full run — see
+`docs/known-issues.md`'s entry, formerly titled "Known non-bug: rare simulate.ts 'failure'
+on seed 3925", now marked OPEN), not the ~1-in-5000 that entry used to claim. Confirmed
+this is not a regression from the redesign commits (`git log <redesign-range> --
+src/engine src/ai src/cli` returns nothing) — it was already true of the engine, just not
+re-measured recently. `docs/known-issues.md` has the exact reproducible seed list and a
+concrete next-step (re-run the seed-3925 investigation's state-signature-logging technique
+against the newly-listed failing seeds, e.g. seed 1, and check whether recent `deck.ts`/
+`winCheck.ts` changes visible in `git log` shifted the odds). Start there before doing
+anything else engine-related.
 
 ## Things that deviate from tech-spec.md — trust the code, not the spec text
 
